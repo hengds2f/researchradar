@@ -67,7 +67,13 @@ document.addEventListener('DOMContentLoaded', () => {
             method: 'POST',
             body: formData
         })
-        .then(res => res.json())
+        .then(async res => {
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(errText);
+            }
+            return res.json();
+        })
         .then(data => {
             if (data.papers) {
                 updatePaperList(data.papers);
@@ -76,7 +82,8 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .catch(err => {
             console.error('Upload failed', err);
-            dropZone.querySelector('p').textContent = 'Upload failed. Try again.';
+            // Show the first 50 chars of the error to the user to help debug
+            dropZone.querySelector('p').textContent = 'Upload failed: ' + String(err).substring(0, 50);
         });
     }
 

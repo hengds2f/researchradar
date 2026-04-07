@@ -70,10 +70,15 @@ def compute_embeddings():
         return
     texts = [c['content'] for c in paper_chunks]
     vectorizer = TfidfVectorizer(stop_words='english', max_features=1536)
-    tfidf_matrix = vectorizer.fit_transform(texts)
     
-    for i, c in enumerate(paper_chunks):
-        c['embedding'] = tfidf_matrix[i].toarray()[0]
+    try:
+        tfidf_matrix = vectorizer.fit_transform(texts)
+        for i, c in enumerate(paper_chunks):
+            c['embedding'] = tfidf_matrix[i].toarray()[0]
+    except ValueError:
+        # Fallback if no english words are found (empty vocabulary)
+        for i, c in enumerate(paper_chunks):
+            c['embedding'] = [0.0] * 1536
         
     # Compute paper level embeddings for clustering
     paper_ids = list(papers.keys())
