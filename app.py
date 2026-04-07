@@ -2,21 +2,29 @@ import os
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from werkzeug.utils import secure_filename
 import PyPDF2
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import json
+import re
+
+# AI Integration
+from openai import OpenAI
+from supabase import create_client, Client
 
 app = Flask(__name__, static_folder='static')
 
-# In-memory "database"
-papers = {}
-paper_chunks = []
+# Environment configuration
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-import re
+if not all([SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY]):
+    print("Warning: Missing SUPABASE_URL, SUPABASE_KEY, or OPENAI_API_KEY.")
+else:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
 
 def extract_sections(text):
-    # Clean text to assist matching
     text_clean = text.replace('\n', ' ')
     
     markers = {
@@ -55,7 +63,6 @@ def extract_sections(text):
         if len(content) > 10:
             extracted.append({'section_type': valid_markers[i][0], 'content': content})
             
-    # Guarantee we return fallback minimum viable structure if missing crucial sections
     types_found = [s['section_type'] for s in extracted]
     if 'methods' not in types_found and len(extracted) > 0:
          extracted.append({'section_type': 'methods', 'content': extracted[0]['content']})
@@ -64,27 +71,16 @@ def extract_sections(text):
             
     return extracted
 
-def compute_embeddings():
-    if not paper_chunks:
-        return
-    texts = [c['content'] for c in paper_chunks]
-    vectorizer = TfidfVectorizer(stop_words='english', max_features=1536)
-    
+def generate_embedding(text):
     try:
-        tfidf_matrix = vectorizer.fit_transform(texts)
-        for i, c in enumerate(paper_chunks):
-            c['embedding'] = tfidf_matrix[i].toarray()[0].tolist()
-    except ValueError:
-        # Fallback if no english words are found (empty vocabulary)
-        for i, c in enumerate(paper_chunks):
-            c['embedding'] = [0.0] * 1536
-        
-    # Compute paper level embeddings for clustering
-    paper_ids = list(papers.keys())
-    for pid in paper_ids:
-        p_chunks = [c['embedding'] for c in paper_chunks if c['paper_id'] == pid and 'embedding' in c]
-        if p_chunks:
-            papers[pid]['embedding'] = np.mean(p_chunks, axis=0).tolist()
+        response = openai_client.embeddings.create(
+            input=text,
+            model="text-embedding-3-small"
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        print(f"Embedding error: {e}")
+        return [0.0] * 1536
 
 @app.route('/')
 def serve_html():
@@ -92,6 +88,9 @@ def serve_html():
 
 @app.route('/api/upload', methods=['POST'])
 def upload_pdf():
+    if not all([SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY]):
+         return jsonify({'error': 'Server missing credentials. Check console for .env status.'}), 500
+         
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
     files = request.files.getlist('file')
@@ -119,64 +118,78 @@ def upload_pdf():
                 print(f"Error parsing {filename}: {e}")
                 continue
                         
-            # Store paper
-            paper_id = str(len(papers) + 1)
-            
-            # Extract chunks
+            # Insert Paper into Supabase
             sections = extract_sections(text)
-            for s in sections:
-                paper_chunks.append({
-                    'id': str(len(paper_chunks) + 1),
-                    'paper_id': paper_id,
-                    'section_type': s['section_type'],
-                    'content': s['content']
-                })
-                
             chunk_types = list(set([s['section_type'] for s in sections]))
-            papers[paper_id] = {
-                'id': paper_id,
+            
+            paper_res = supabase.table('papers').insert({
                 'title': filename.replace('.pdf', ''),
                 'filename': filename,
                 'chunk_types': chunk_types
-            }
-            uploaded_papers.append(papers[paper_id])
+            }).execute()
+            
+            if not paper_res.data:
+                continue
+            
+            paper_id = paper_res.data[0]['id']
+            uploaded_papers.append(paper_res.data[0])
+            
+            # Extract chunks and generate OpenAI Embeddings
+            for s in sections:
+                embedding = generate_embedding(s['content'])
+                supabase.table('paper_chunks').insert({
+                    'paper_id': paper_id,
+                    'section_type': s['section_type'],
+                    'content': s['content'],
+                    'embedding': embedding
+                }).execute()
                 
-    compute_embeddings()
     return jsonify({'message': 'Successfully processed', 'papers': uploaded_papers})
 
 
-def mock_llm_synthesise(mode, query, retrieved):
-    if not retrieved:
+def synthesize_with_llm(mode, query, retrieved_chunks):
+    if not retrieved_chunks:
         return "No relevant information found in the uploaded corpus."
         
-    sources = "\n\n".join([f"[{c['paper_id']} - {c['section_type']}]: {c['content'][:200]}..." for c in retrieved])
-    
-    # Format a fake response trying to look like what an LLM would do.
-    response = ""
+    context = ""
+    for i, c in enumerate(retrieved_chunks):
+        context += f"\n\n--- Source [{i+1}] (Paper ID: {c['paper_id']} - Section: {c['section_type']}) ---\n"
+        context += c['content'][:2500] 
+
     if mode == 'synthesis':
-        response = f"**Synthesis Report**\n\nBased on your query '{query}', here are the common findings synthesized across the results:\n\n"
-        response += "The papers primarily indicate consistent patterns in the data, concluding that the measured phenomena have strong positive correlations overall.\n\n"
-        response += "**Sources:**\n" + sources
+        system_prompt = "You are a research synthesis assistant. Compare the provided sources and summarize the common findings. Explicitly cite the source paper IDs in your response."
     elif mode == 'methodology':
-        response = f"**Methodology Comparison Table**\n\n| Paper | Method Approach | Key Characteristics |\n|---|---|---|\n"
-        for r in retrieved[:3]:
-            response += f"| Paper {r['paper_id']} | Empirical study | {r['content'][:50]}... |\n"
-        response += "\n\n**Sources:**\n" + sources
+        system_prompt = "You are a research assistant. Compare the methodologies of the provided sources. Output a Markdown table comparing their approaches and key characteristics."
     elif mode == 'gap':
-        response = f"**Research Gap Analysis**\n\nBased on the discussions in the provided papers:\n\n- The majority of papers note temporal limitations.\n- Several studies highlight the need for larger sample sizes.\n\n"
-        response += "**Sources:**\n" + sources
-    else: # qna
-        response = f"**Answer**\n\nRegarding your question '{query}', the extracted content suggests standard findings typical in this field of research.\n\n"
-        response += "**Sources:**\n" + sources
-    return response
+        system_prompt = "You are a research assistant analysing academic papers. Discuss the limitations and research gaps mentioned in the provided text."
+    else: 
+        system_prompt = "You are a knowledgeable academic assistant. Answer the user's question using the provided source context. Cite Paper IDs."
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Context:\n{context}\n\nQuery: {query}"}
+    ]
+
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.3
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"LLM generation failed: {str(e)}"
 
 @app.route('/api/query', methods=['POST'])
 def query_papers():
+    if not all([SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY]):
+         return jsonify({'error': 'Server missing credentials. Check console for .env status.'}), 500
+         
     data = request.json
-    mode = data.get('mode', 'qa') # synthesis, methodology, gap, qa
+    mode = data.get('mode', 'qa') 
     query_text = data.get('query', '')
     
-    # 1. Filter by section type like Supabase filter
+    # Map mode to specific section filters strictly following researchradar directives
     valid_sections = ['abstract', 'introduction', 'methods', 'results', 'discussion']
     if mode == 'synthesis':
         valid_sections = ['abstract', 'results']
@@ -185,62 +198,32 @@ def query_papers():
     elif mode == 'gap':
         valid_sections = ['discussion']
         
-    filtered_chunks = [c for c in paper_chunks if c['section_type'] in valid_sections]
+    query_vector = generate_embedding(query_text if query_text.strip() else "general academic discussion")
     
-    if not filtered_chunks:
-        return jsonify({'response': "No sections matching the query mode were found. Please upload papers first or check chunks."})
+    # Hit Supabase pgvector RPC function for cosine similarity matching
+    try:
+        results = supabase.rpc('match_chunks', {
+            'query_embedding': query_vector,
+            'match_threshold': 0.1,
+            'match_count': 5,
+            'valid_sections': valid_sections
+        }).execute()
         
-    # 2. Mock vector search: TF-IDF similarity with the query. 
-    # If no query is provided (e.g. general synthesize all), just return all top filtered chunks.
-    if query_text.strip():
-        # Fit vectorizer on filtered chunks + query to get similarities
-        texts = [c['content'] for c in filtered_chunks] + [query_text]
-        vectorizer = TfidfVectorizer(stop_words='english')
-        try:
-            tfidf_matrix = vectorizer.fit_transform(texts)
-            sims = cosine_similarity(tfidf_matrix[-1:], tfidf_matrix[:-1]).flatten()
-            
-            top_k_indices = sims.argsort()[-5:][::-1] # top 5
-            retrieved = [filtered_chunks[i] for i in top_k_indices if sims[i] > 0]
-        except ValueError:
-            # fallback if tfidf fails due to empty vocab
-            retrieved = filtered_chunks[:5]
-    else:
-        retrieved = filtered_chunks[:5]
+        retrieved = results.data
+    except Exception as e:
+        return jsonify({'error': f'Supabase vector query failed: {str(e)}'}), 500
         
-    # 3. Pass to mock LLM
-    response_text = mock_llm_synthesise(mode, query_text, retrieved)
+    if not retrieved:
+        return jsonify({'response': "No sections matching the query mode were found. Please check uploaded chunks."})
+        
+    # Pass to OpenAI LLM
+    response_text = synthesize_with_llm(mode, query_text, retrieved)
     
     return jsonify({'response': response_text, 'chunks': retrieved})
 
 @app.route('/api/clustering', methods=['GET'])
 def clustering_data():
-    if not papers:
-        return jsonify({"nodes": [], "links": []})
-        
-    nodes = []
-    vector_list = []
-    pid_list = []
-    
-    for pid, p in papers.items():
-        if 'embedding' in p:
-            nodes.append({"id": pid, "title": p['title'], "group": 1})
-            vector_list.append(p['embedding'])
-            pid_list.append(pid)
-            
-    links = []
-    if len(vector_list) > 1:
-        sim_matrix = cosine_similarity(vector_list)
-        for i in range(len(vector_list)):
-            for j in range(i+1, len(vector_list)):
-                if sim_matrix[i][j] > 0.1: # threshold edge
-                    links.append({
-                        "source": pid_list[i],
-                        "target": pid_list[j],
-                        "value": float(sim_matrix[i][j])
-                    })
-                    
-    return jsonify({"nodes": nodes, "links": links})
+    return jsonify({"nodes": [], "links": []}) # Temporarily disabled the specific stretch clustering for true architecture rewrite 
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=7860)
