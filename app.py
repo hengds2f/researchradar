@@ -8,8 +8,6 @@ import numpy as np
 import json
 
 app = Flask(__name__, static_folder='static')
-app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # In-memory "database"
 papers = {}
@@ -101,21 +99,21 @@ def upload_pdf():
             continue
         if file and (file.filename.endswith('.pdf') or file.filename.endswith('.txt')):
             filename = secure_filename(file.filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
             
-            # Parse text
+            # Parse text directly from memory
             text = ""
-            if filename.endswith('.pdf'):
-                with open(filepath, 'rb') as f:
-                    reader = PyPDF2.PdfReader(f)
+            try:
+                if filename.endswith('.pdf'):
+                    reader = PyPDF2.PdfReader(file.stream)
                     for page in reader.pages:
                         page_text = page.extract_text()
                         if page_text:
                             text += page_text + "\n"
-            else:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    text = f.read()
+                else:
+                    text = file.read().decode('utf-8')
+            except Exception as e:
+                print(f"Error parsing {filename}: {e}")
+                continue
                         
             # Store paper
             paper_id = str(len(papers) + 1)
