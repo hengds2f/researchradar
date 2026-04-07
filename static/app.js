@@ -101,7 +101,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         allPapers.forEach(p => {
             const li = document.createElement('li');
-            li.textContent = p.title;
+            const chunkStr = p.chunk_types ? p.chunk_types.join(', ') : 'abstract, methods, results, discussion';
+            li.innerHTML = `<div><strong>${p.title}</strong><br><span style="font-size: 0.75rem; color: #94a3b8;">Extracted Sections: ${chunkStr}</span></div>`;
             paperList.appendChild(li);
         });
     }

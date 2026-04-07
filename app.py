@@ -13,46 +13,26 @@ app = Flask(__name__, static_folder='static')
 papers = {}
 paper_chunks = []
 
+import re
+
 def extract_sections(text):
-    sections = []
-    current_section = 'introduction'
-    current_content = []
+    # Clean text to assist matching
+    text_clean = text.replace('\n', ' ')
     
-    lines = text.split('\n')
-    for line in lines:
-        l_upper = line.strip().upper()
-        if 'ABSTRACT' in l_upper and len(l_upper) < 20:
-            if current_content:
-                sections.append({'section_type': current_section, 'content': '\n'.join(current_content).strip()})
-            current_section = 'abstract'
-            current_content = []
-        elif ('METHOD' in l_upper or 'METHODOLOGY' in l_upper) and len(l_upper) < 20:
-            if current_content:
-                sections.append({'section_type': current_section, 'content': '\n'.join(current_content).strip()})
-            current_section = 'methods'
-            current_content = []
-        elif 'RESULT' in l_upper and len(l_upper) < 20:
-            if current_content:
-                sections.append({'section_type': current_section, 'content': '\n'.join(current_content).strip()})
-            current_section = 'results'
-            current_content = []
-        elif 'DISCUSSION' in l_upper and len(l_upper) < 20:
-            if current_content:
-                sections.append({'section_type': current_section, 'content': '\n'.join(current_content).strip()})
-            current_section = 'discussion'
-            current_content = []
-        else:
-            current_content.append(line)
-            
-    if current_content:
-        sections.append({'section_type': current_section, 'content': '\n'.join(current_content).strip()})
-        
-    filtered = [s for s in sections if len(s['content']) > 50]
+    markers = {
+        'abstract': re.search(r'\b(abstract|summary)\b', text, re.IGNORECASE),
+        'introduction': re.search(r'\b(introduction|background)\b', text, re.IGNORECASE),
+        'methods': re.search(r'\b(method|methods|methodology|approach)\b', text, re.IGNORECASE),
+        'results': re.search(r'\b(result|results|findings)\b', text, re.IGNORECASE),
+        'discussion': re.search(r'\b(discussion|conclusion|conclusions)\b', text, re.IGNORECASE)
+    }
     
-    # Fallback if heuristic failed entirely
-    if len(filtered) < 2:
+    valid_markers = [(k, v.start()) for k, v in markers.items() if v]
+    valid_markers.sort(key=lambda x: x[1])
+    
+    if not valid_markers:
         words = text.split()
-        if len(words) > 100:
+        if len(words) > 40:
             q = len(words) // 4
             return [
                 {'section_type': 'abstract', 'content': ' '.join(words[:q])},
@@ -61,9 +41,28 @@ def extract_sections(text):
                 {'section_type': 'discussion', 'content': ' '.join(words[q*3:])}
             ]
         else:
-            return [{'section_type': 'abstract', 'content': text}]
+             return [{'section_type': 'abstract', 'content': text}]
+
+    extracted = []
+    for i in range(len(valid_markers)):
+        start_idx = valid_markers[i][1]
+        if i + 1 < len(valid_markers):
+            end_idx = valid_markers[i+1][1]
+            content = text[start_idx:end_idx].strip()
+        else:
+            content = text[start_idx:].strip()
             
-    return filtered
+        if len(content) > 10:
+            extracted.append({'section_type': valid_markers[i][0], 'content': content})
+            
+    # Guarantee we return fallback minimum viable structure if missing crucial sections
+    types_found = [s['section_type'] for s in extracted]
+    if 'methods' not in types_found and len(extracted) > 0:
+         extracted.append({'section_type': 'methods', 'content': extracted[0]['content']})
+    if 'discussion' not in types_found and len(extracted) > 0:
+         extracted.append({'section_type': 'discussion', 'content': extracted[-1]['content']})
+            
+    return extracted
 
 def compute_embeddings():
     if not paper_chunks:
@@ -122,12 +121,6 @@ def upload_pdf():
                         
             # Store paper
             paper_id = str(len(papers) + 1)
-            papers[paper_id] = {
-                'id': paper_id,
-                'title': filename.replace('.pdf', ''),
-                'filename': filename
-            }
-            uploaded_papers.append(papers[paper_id])
             
             # Extract chunks
             sections = extract_sections(text)
@@ -138,6 +131,15 @@ def upload_pdf():
                     'section_type': s['section_type'],
                     'content': s['content']
                 })
+                
+            chunk_types = list(set([s['section_type'] for s in sections]))
+            papers[paper_id] = {
+                'id': paper_id,
+                'title': filename.replace('.pdf', ''),
+                'filename': filename,
+                'chunk_types': chunk_types
+            }
+            uploaded_papers.append(papers[paper_id])
                 
     compute_embeddings()
     return jsonify({'message': 'Successfully processed', 'papers': uploaded_papers})
