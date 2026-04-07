@@ -129,6 +129,9 @@ def upload_pdf():
 
 
 def synthesize_with_llm(mode, query, retrieved_chunks):
+    if not HF_TOKEN:
+        return "**Authorization Error:** The `HF_TOKEN` environment variable is completely missing from this Hugging Face Space! Please go to **Settings -> Variables and secrets**, add a secret named specifically `HF_TOKEN` with your account token, and then wait 1 minute for the Space to restart."
+        
     if not retrieved_chunks:
         return "No relevant information found in the uploaded corpus."
         
