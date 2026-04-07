@@ -130,24 +130,28 @@ def upload_pdf():
 
 def synthesize_with_llm(mode, query, retrieved_chunks):
     if not HF_TOKEN:
-        return "**Authorization Error:** The `HF_TOKEN` environment variable is completely missing from this Hugging Face Space! Please go to **Settings -> Variables and secrets**, add a secret named specifically `HF_TOKEN` with your account token, and then wait 1 minute for the Space to restart."
+        return "**Authorization Error:** The `HF_TOKEN` environment variable is missing from this Hugging Face Space! Please go to **Settings -> Variables and secrets**, add a secret named specifically `HF_TOKEN` with your account token, and then wait 1 minute for the Space to restart."
         
     if not retrieved_chunks:
         return "No relevant information found in the uploaded corpus."
         
     context = ""
     for i, c in enumerate(retrieved_chunks):
-        context += f"\n\n--- Source [{i+1}] (Paper ID: {c['paper_id']} - Section: {c['section_type']}) ---\n"
+        title = papers.get(c['paper_id'], {}).get('title', 'Unknown Source')
+        context += f"\n\n--- Source [{i+1}] (Paper ID: {c['paper_id']} | Title: {title} | Section: {c['section_type']}) ---\n"
         context += c['content'][:2500] 
 
     if mode == 'synthesis':
-        system_prompt = "You are a research synthesis assistant. Compare the provided sources and summarize the common findings. Explicitly cite the source paper IDs in your response."
+        system_prompt = "You are a research synthesis assistant. Compare the provided sources and summarize the common findings."
     elif mode == 'methodology':
         system_prompt = "You are a research assistant. Compare the methodologies of the provided sources. Output a Markdown table comparing their approaches and key characteristics."
     elif mode == 'gap':
         system_prompt = "You are a research assistant analysing academic papers. Discuss the limitations and research gaps mentioned in the provided text."
     else: 
-        system_prompt = "You are a knowledgeable academic assistant. Answer the user's question using the provided source context. Cite Paper IDs."
+        system_prompt = "You are a knowledgeable academic assistant. Answer the user's question using the provided source context."
+
+    citation_rule = "\n\nCRITICAL INSTRUCTION: You MUST conclude your entire response with a formal 'References' section containing citations for all utilized sources in APA format. You must explicitly use the explicit 'Title' and 'Paper ID' mappings exactly as provided in the Context source blocks."
+    system_prompt += citation_rule
 
     # Use Hugging Face API for completion
     try:
@@ -159,7 +163,7 @@ def synthesize_with_llm(mode, query, retrieved_chunks):
         
         response = hf_client.chat_completion(
             messages=messages,
-            max_tokens=800,
+            max_tokens=1200,
             temperature=0.3
         )
         return response.choices[0].message.content
@@ -213,7 +217,58 @@ def query_papers():
 
 @app.route('/api/clustering', methods=['GET'])
 def clustering_data():
-    return jsonify({"nodes": [], "links": []})
+    try:
+        all_docs = collection.get(include=['embeddings', 'metadatas'])
+        
+        if not all_docs or not all_docs.get('embeddings') or len(all_docs['embeddings']) < 2:
+            return jsonify({"nodes": [], "links": []})
+            
+        embeddings = np.array(all_docs['embeddings'])
+        metadatas = all_docs['metadatas']
+        
+        nodes = []
+        for meta in metadatas:
+            paper_id = meta['paper_id']
+            title = papers.get(paper_id, {}).get('title', 'Unknown')
+            if not any(n['id'] == paper_id for n in nodes):
+                nodes.append({
+                    "id": paper_id,
+                    "title": title[:50] + "..." if len(title) > 50 else title,
+                    "group": 1
+                })
+                
+        # Aggregate chunk embeddings to paper level
+        paper_embeddings = {}
+        for emb, meta in zip(embeddings, metadatas):
+            pid = meta['paper_id']
+            if pid not in paper_embeddings:
+                paper_embeddings[pid] = []
+            paper_embeddings[pid].append(emb)
+            
+        for pid in paper_embeddings:
+            paper_embeddings[pid] = np.mean(paper_embeddings[pid], axis=0)
+            
+        links = []
+        p_ids = list(paper_embeddings.keys())
+        for i in range(len(p_ids)):
+            for j in range(i+1, len(p_ids)):
+                v1 = paper_embeddings[p_ids[i]]
+                v2 = paper_embeddings[p_ids[j]]
+                
+                # Compute mathematical Cosine Similarity Density
+                sim = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+                
+                if sim > 0.65: # Thematic boundary threshold
+                    links.append({
+                        "source": p_ids[i],
+                        "target": p_ids[j],
+                        "value": float(sim)
+                    })
+    
+        return jsonify({"nodes": nodes, "links": links})
+    except Exception as e:
+        print(f"Clustering matrix error: {e}")
+        return jsonify({"nodes": [], "links": []})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=7860)
