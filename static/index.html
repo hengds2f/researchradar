@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ResearchRadar</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div class="background-accents">
+        <div class="accent-blob blob-1"></div>
+        <div class="accent-blob blob-2"></div>
+    </div>
+    
+    <header class="navbar">
+        <div class="logo">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+            <h1>ResearchRadar</h1>
+        </div>
+        <nav>
+            <button id="nav-synthesis" class="active">Synthesis</button>
+            <button id="nav-cluster">Clustering Map</button>
+        </nav>
+    </header>
+
+    <main class="container">
+        <!-- Dashboard / Synthesis Section -->
+        <section id="synthesis-view" class="view-section active">
+            <div class="two-col-layout">
+                <div class="col left-col glass-panel">
+                    <h2>Knowledge Base</h2>
+                    <p class="subtitle">Upload academic PDFs to build your corpus.</p>
+                    
+                    <div class="upload-zone" id="drop-zone">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                        <p>Drag & drop PDFs here, or click to browse</p>
+                        <input type="file" id="file-input" multiple accept=".pdf, .txt" style="display: none;">
+                    </div>
+
+                    <div class="uploaded-list">
+                        <h3>Uploaded Papers</h3>
+                        <ul id="paper-list">
+                            <li class="empty-state">No papers uploaded yet.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="col right-col glass-panel">
+                    <h2>AI Assistant</h2>
+                    <p class="subtitle">Query your corpus with section-aware analysis.</p>
+                    
+                    <div class="query-area">
+                        <div class="form-group">
+                            <label for="query-mode">Mode</label>
+                            <select id="query-mode" class="styled-select">
+                                <option value="synthesis">Synthesis (Cross-paper findings)</option>
+                                <option value="methodology">Methodology Comparison</option>
+                                <option value="gap">Research Gap Analysis</option>
+                                <option value="qa">General Q&A</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="query-input">Query</label>
+                            <textarea id="query-input" placeholder="What are the common findings across these papers?"></textarea>
+                        </div>
+                        
+                        <button id="btn-submit" class="btn-primary">Generate Insights</button>
+                    </div>
+
+                    <div class="result-area">
+                        <div class="loading-state hidden" id="loading-spinner">
+                            <div class="spinner"></div>
+                            <span>Synthesizing...</span>
+                        </div>
+                        <div id="result-content" class="markdown-body">
+                            <!-- LLM result goes here -->
+                            <div class="empty-state">Query results will appear here.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Clustering View Section -->
+        <section id="cluster-view" class="view-section hidden">
+            <div class="glass-panel full-width">
+                <h2>Semantic Clustering Map</h2>
+                <p class="subtitle">Visualizing topic groupings across the uploaded corpus based on vector embeddings.</p>
+                <div id="d3-container" class="d3-canvas"></div>
+            </div>
+        </section>
+
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
