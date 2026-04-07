@@ -8,7 +8,7 @@ import numpy as np
 import json
 
 app = Flask(__name__, static_folder='static')
-app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # In-memory "database"
