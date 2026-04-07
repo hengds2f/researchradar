@@ -3,26 +3,25 @@ from flask import Flask, request, jsonify, render_template, send_from_directory
 from werkzeug.utils import secure_filename
 import PyPDF2
 import numpy as np
-import json
 import re
 
 # AI Integration
-from openai import OpenAI
-from supabase import create_client, Client
+import chromadb
+from huggingface_hub import InferenceClient
 
 app = Flask(__name__, static_folder='static')
 
 # Environment configuration
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+HF_TOKEN = os.environ.get("HF_TOKEN")
 
-if not all([SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY]):
-    print("Warning: Missing SUPABASE_URL, SUPABASE_KEY, or OPENAI_API_KEY.")
-else:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+if not HF_TOKEN:
+    print("Warning: Missing HF_TOKEN environment variable. LLM Synthesis will fail.")
 
+# Initialize ChromaDB (Local In-Memory Vector Database)
+chroma_client = chromadb.Client()
+collection = chroma_client.get_or_create_collection(name="research_papers")
+
+papers = {}
 
 def extract_sections(text):
     text_clean = text.replace('\n', ' ')
@@ -71,26 +70,12 @@ def extract_sections(text):
             
     return extracted
 
-def generate_embedding(text):
-    try:
-        response = openai_client.embeddings.create(
-            input=text,
-            model="text-embedding-3-small"
-        )
-        return response.data[0].embedding
-    except Exception as e:
-        print(f"Embedding error: {e}")
-        return [0.0] * 1536
-
 @app.route('/')
 def serve_html():
     return send_from_directory('static', 'index.html')
 
 @app.route('/api/upload', methods=['POST'])
 def upload_pdf():
-    if not all([SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY]):
-         return jsonify({'error': 'Server missing credentials. Check console for .env status.'}), 500
-         
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
     files = request.files.getlist('file')
@@ -118,31 +103,27 @@ def upload_pdf():
                 print(f"Error parsing {filename}: {e}")
                 continue
                         
-            # Insert Paper into Supabase
+            # Store Paper Locally
             sections = extract_sections(text)
             chunk_types = list(set([s['section_type'] for s in sections]))
             
-            paper_res = supabase.table('papers').insert({
+            paper_id = str(len(papers) + 1)
+            papers[paper_id] = {
+                'id': paper_id,
                 'title': filename.replace('.pdf', ''),
                 'filename': filename,
                 'chunk_types': chunk_types
-            }).execute()
+            }
+            uploaded_papers.append(papers[paper_id])
             
-            if not paper_res.data:
-                continue
-            
-            paper_id = paper_res.data[0]['id']
-            uploaded_papers.append(paper_res.data[0])
-            
-            # Extract chunks and generate OpenAI Embeddings
-            for s in sections:
-                embedding = generate_embedding(s['content'])
-                supabase.table('paper_chunks').insert({
-                    'paper_id': paper_id,
-                    'section_type': s['section_type'],
-                    'content': s['content'],
-                    'embedding': embedding
-                }).execute()
+            # Inject documents into ChromaDB mapped with section_type metadata
+            for i, s in enumerate(sections):
+                chunk_id = f"{paper_id}_chunk_{i}"
+                collection.add(
+                    documents=[s['content']],
+                    metadatas=[{"paper_id": paper_id, "section_type": s['section_type']}],
+                    ids=[chunk_id]
+                )
                 
     return jsonify({'message': 'Successfully processed', 'papers': uploaded_papers})
 
@@ -165,15 +146,17 @@ def synthesize_with_llm(mode, query, retrieved_chunks):
     else: 
         system_prompt = "You are a knowledgeable academic assistant. Answer the user's question using the provided source context. Cite Paper IDs."
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Context:\n{context}\n\nQuery: {query}"}
-    ]
-
+    # Use Hugging Face API for completion
     try:
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+        hf_client = InferenceClient(model="meta-llama/Meta-Llama-3-8B-Instruct", token=HF_TOKEN)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Context:\n{context}\n\nQuery: {query}"}
+        ]
+        
+        response = hf_client.chat_completion(
             messages=messages,
+            max_tokens=800,
             temperature=0.3
         )
         return response.choices[0].message.content
@@ -182,14 +165,11 @@ def synthesize_with_llm(mode, query, retrieved_chunks):
 
 @app.route('/api/query', methods=['POST'])
 def query_papers():
-    if not all([SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY]):
-         return jsonify({'error': 'Server missing credentials. Check console for .env status.'}), 500
-         
     data = request.json
     mode = data.get('mode', 'qa') 
     query_text = data.get('query', '')
     
-    # Map mode to specific section filters strictly following researchradar directives
+    # Map mode to specific section filters strictly using ChromaDB Metadata Filtering rules
     valid_sections = ['abstract', 'introduction', 'methods', 'results', 'discussion']
     if mode == 'synthesis':
         valid_sections = ['abstract', 'results']
@@ -198,32 +178,39 @@ def query_papers():
     elif mode == 'gap':
         valid_sections = ['discussion']
         
-    query_vector = generate_embedding(query_text if query_text.strip() else "general academic discussion")
+    query_target = query_text if query_text.strip() else "general academic discussion"
     
-    # Hit Supabase pgvector RPC function for cosine similarity matching
+    # Hit ChromaDB filtering native sections
     try:
-        results = supabase.rpc('match_chunks', {
-            'query_embedding': query_vector,
-            'match_threshold': 0.1,
-            'match_count': 5,
-            'valid_sections': valid_sections
-        }).execute()
+        results = collection.query(
+            query_texts=[query_target],
+            n_results=5,
+            where={"section_type": {"$in": valid_sections}}
+        )
         
-        retrieved = results.data
+        # Unpack ChromaDB generic structure
+        retrieved = []
+        if results['documents'] and results['documents'][0]:
+            for doc, meta in zip(results['documents'][0], results['metadatas'][0]):
+                retrieved.append({
+                    'paper_id': meta['paper_id'],
+                    'section_type': meta['section_type'],
+                    'content': doc
+                })
     except Exception as e:
-        return jsonify({'error': f'Supabase vector query failed: {str(e)}'}), 500
+        return jsonify({'error': f'ChromaDB vector query failed: {str(e)}'}), 500
         
     if not retrieved:
         return jsonify({'response': "No sections matching the query mode were found. Please check uploaded chunks."})
         
-    # Pass to OpenAI LLM
+    # Pass to Hugging Face LLM
     response_text = synthesize_with_llm(mode, query_text, retrieved)
     
     return jsonify({'response': response_text, 'chunks': retrieved})
 
 @app.route('/api/clustering', methods=['GET'])
 def clustering_data():
-    return jsonify({"nodes": [], "links": []}) # Temporarily disabled the specific stretch clustering for true architecture rewrite 
+    return jsonify({"nodes": [], "links": []})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=7860)
