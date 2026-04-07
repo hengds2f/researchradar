@@ -1,0 +1,8 @@
+ABSTRACT
+The impact of AI on modern scientific research methodology has been profound. We investigate how neural network architectures compare to traditional modeling.
+METHODS
+We conducted a comprehensive literature review of 40 papers and trained a transformer model on the semantic relationships between variables.
+RESULTS
+We found that models leveraging attention layers accurately retrieved semantic clustering 40% faster.
+DISCUSSION
+These findings suggest that traditional research synthesis techniques will soon be entirely obsolete.

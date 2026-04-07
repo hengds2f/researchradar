@@ -392,3 +392,28 @@ textarea {
     stroke: var(--glass-border);
     stroke-opacity: 0.6;
 }
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+    .two-col-layout {
+        grid-template-columns: 1fr;
+    }
+    
+    .container {
+        padding: 1rem;
+    }
+    
+    .navbar {
+        flex-direction: column;
+        padding: 1rem;
+        gap: 1rem;
+    }
+    
+    nav button {
+        margin: 0 0.5rem;
+    }
+    
+    .glass-panel {
+        padding: 1.25rem;
+    }
+}
