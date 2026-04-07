@@ -74,7 +74,7 @@ def compute_embeddings():
     try:
         tfidf_matrix = vectorizer.fit_transform(texts)
         for i, c in enumerate(paper_chunks):
-            c['embedding'] = tfidf_matrix[i].toarray()[0]
+            c['embedding'] = tfidf_matrix[i].toarray()[0].tolist()
     except ValueError:
         # Fallback if no english words are found (empty vocabulary)
         for i, c in enumerate(paper_chunks):
@@ -85,7 +85,7 @@ def compute_embeddings():
     for pid in paper_ids:
         p_chunks = [c['embedding'] for c in paper_chunks if c['paper_id'] == pid and 'embedding' in c]
         if p_chunks:
-            papers[pid]['embedding'] = np.mean(p_chunks, axis=0)
+            papers[pid]['embedding'] = np.mean(p_chunks, axis=0).tolist()
 
 @app.route('/')
 def serve_html():
