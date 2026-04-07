@@ -127,6 +127,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ mode, query })
             });
+            
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error("HTTP " + res.status + " " + errText);
+            }
+            
             const data = await res.json();
             
             loadingSpinner.classList.add('hidden');
@@ -141,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             loadingSpinner.classList.add('hidden');
             resultContent.classList.remove('hidden');
-            resultContent.innerHTML = '<div class="empty-state">Error generating insights.</div>';
+            resultContent.innerHTML = '<div class="empty-state">Error generating insights: ' + String(err).substring(0, 500) + '</div>';
         }
     });
 
