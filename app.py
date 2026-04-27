@@ -1,5 +1,6 @@
 import os
 import logging
+from datetime import datetime, timezone
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from werkzeug.utils import secure_filename
 import PyPDF2
@@ -511,12 +512,123 @@ def get_provenance(paper_id):
     """Return the full provenance history and chain verification for a paper."""
     history = provenance_service.get_history(paper_id)
     verification = provenance_service.verify_chain(paper_id)
+    blockchain_explorer = (
+        os.environ.get('BLOCKCHAIN_EXPLORER_URL', 'https://etherscan.io')
+        if _blockchain_service.is_real_chain else ''
+    )
     return jsonify({
         'paper_id': paper_id,
         'records': history,
         'chain_verification': verification,
         'blockchain_mode': 'real' if _blockchain_service.is_real_chain else 'mock',
         'ipfs_enabled': _ipfs_service.is_enabled,
+        'blockchain_explorer_url': blockchain_explorer,
+    })
+
+
+@app.route('/api/provenance/<paper_id>/export', methods=['GET'])
+def export_provenance(paper_id):
+    """Export the full provenance chain as a downloadable JSON file."""
+    history = provenance_service.get_history(paper_id)
+    verification = provenance_service.verify_chain(paper_id)
+    export_data = {
+        'export_timestamp': datetime.now(timezone.utc).isoformat(),
+        'paper_id': paper_id,
+        'paper_title': papers.get(paper_id, {}).get('title', 'Unknown'),
+        'chain_verification': verification,
+        'blockchain_mode': 'real' if _blockchain_service.is_real_chain else 'mock',
+        'ipfs_enabled': _ipfs_service.is_enabled,
+        'records': history,
+    }
+    response = jsonify(export_data)
+    response.headers['Content-Disposition'] = (
+        f'attachment; filename="provenance_{paper_id}.json"'
+    )
+    return response
+
+
+@app.route('/api/provenance/<paper_id>/proof', methods=['GET'])
+def download_proof(paper_id):
+    """Generate a verifiable timestamped proof document for a paper."""
+    if paper_id not in papers:
+        return jsonify({'error': 'Paper not found'}), 404
+
+    history = provenance_service.get_history(paper_id)
+    verification = provenance_service.verify_chain(paper_id)
+    paper = papers[paper_id]
+    upload_record = next((r for r in history if r['record_type'] == 'upload'), None)
+
+    proof = {
+        'proof_version': '1.0',
+        'generated_at': datetime.now(timezone.utc).isoformat(),
+        'subject': {
+            'paper_id': paper_id,
+            'title': paper.get('title', 'Unknown'),
+            'filename': paper.get('filename', 'Unknown'),
+        },
+        'provenance_summary': {
+            'total_records': len(history),
+            'chain_valid': verification.get('valid', False),
+            'chain_integrity_message': verification.get('message', ''),
+            'first_recorded_at': history[0]['timestamp'] if history else None,
+            'last_recorded_at': history[-1]['timestamp'] if history else None,
+        },
+        'upload_proof': {
+            'content_hash': upload_record['content_hash'],
+            'record_hash': upload_record['record_hash'],
+            'timestamp': upload_record['timestamp'],
+            'tx_hash': upload_record.get('tx_hash'),
+            'ipfs_cid': upload_record.get('ipfs_cid'),
+        } if upload_record else None,
+        'infrastructure': {
+            'blockchain_mode': 'real' if _blockchain_service.is_real_chain else 'mock',
+            'ipfs_enabled': _ipfs_service.is_enabled,
+        },
+        'full_chain': history,
+    }
+
+    response = jsonify(proof)
+    response.headers['Content-Disposition'] = (
+        f'attachment; filename="proof_{paper_id}.json"'
+    )
+    return response
+
+
+@app.route('/api/provenance/verify-hash', methods=['POST'])
+def verify_hash():
+    """Verify a SHA-256 content hash against all provenance records."""
+    data = request.get_json(silent=True) or {}
+    content_hash = (data.get('content_hash') or '').strip().lower()
+    paper_id = (data.get('paper_id') or '').strip() or None
+
+    if not content_hash:
+        return jsonify({'error': 'content_hash is required'}), 400
+
+    if paper_id:
+        search_scope = {paper_id: provenance_service.get_history(paper_id)}
+    else:
+        search_scope = provenance_service.get_all()
+
+    matches = []
+    for pid, records in search_scope.items():
+        for rec in records:
+            if rec.get('content_hash', '').lower() == content_hash:
+                matches.append({
+                    'paper_id': pid,
+                    'paper_title': papers.get(pid, {}).get('title', 'Unknown'),
+                    'record_id': rec['record_id'],
+                    'record_type': rec['record_type'],
+                    'timestamp': rec['timestamp'],
+                    'record_hash': rec['record_hash'],
+                    'tx_hash': rec.get('tx_hash'),
+                    'ipfs_cid': rec.get('ipfs_cid'),
+                })
+
+    return jsonify({
+        'content_hash': content_hash,
+        'found': len(matches) > 0,
+        'match_count': len(matches),
+        'matches': matches,
     })
 
 

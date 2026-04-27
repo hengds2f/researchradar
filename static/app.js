@@ -785,6 +785,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const provenancePaperSelect = document.getElementById('provenance-paper-select');
     const btnLoadProvenance = document.getElementById('btn-load-provenance');
+    const btnExportJson = document.getElementById('btn-export-json');
+    const btnDownloadProof = document.getElementById('btn-download-proof');
+    const provenanceActions = document.getElementById('provenance-actions');
     const chainStatus = document.getElementById('chain-status');
     const chainIndicator = document.getElementById('chain-indicator');
     const chainValidLabel = document.getElementById('chain-valid-label');
@@ -794,6 +797,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const chainRecordCount = document.getElementById('chain-record-count');
     const provenanceLoading = document.getElementById('provenance-loading');
     const provenanceTimeline = document.getElementById('provenance-timeline');
+
+    // Track the currently loaded paper id and capabilities for export/proof actions
+    let _currentProvPaperId = null;
+    let _currentExplorerUrl = '';
+    let _currentIpfsEnabled = false;
 
     async function refreshProvenancePaperSelector() {
         try {
@@ -826,6 +834,7 @@ document.addEventListener('DOMContentLoaded', () => {
         provenanceLoading.classList.remove('hidden');
         provenanceTimeline.innerHTML = '';
         chainStatus.classList.add('hidden');
+        provenanceActions.classList.add('hidden');
 
         const provLog = new ActivityLog('provenance-log');
         const simIds = simulateProgress(provLog, [
@@ -841,6 +850,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             cancelSimulation(simIds);
             provenanceLoading.classList.add('hidden');
+
+            // Stash state for export / proof buttons
+            _currentProvPaperId = paperId;
+            _currentExplorerUrl = data.blockchain_explorer_url || '';
+            _currentIpfsEnabled = !!data.ipfs_enabled;
 
             // Chain status
             const cv = data.chain_verification || {};
@@ -861,6 +875,9 @@ document.addEventListener('DOMContentLoaded', () => {
             chainRecordCount.textContent = `${recCount} record(s)`;
             chainStatus.classList.remove('hidden');
 
+            // Show export/proof actions
+            provenanceActions.classList.remove('hidden');
+
             // Timeline
             const records = data.records || [];
             if (!records.length) {
@@ -869,17 +886,55 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             provenanceTimeline.innerHTML = '';
-            records.forEach((rec, idx) => {
+            records.forEach((rec) => {
                 const card = document.createElement('div');
                 card.className = `provenance-card provenance-${rec.record_type}`;
 
                 const typeIcon = { upload: '📄', summary: '📝', agent_output: '🤖' }[rec.record_type] || '📌';
                 const shortHash = rec.content_hash ? rec.content_hash.substring(0, 16) + '…' : '—';
                 const shortRecord = rec.record_hash ? rec.record_hash.substring(0, 16) + '…' : '—';
-                const txHash = rec.tx_hash ? rec.tx_hash.substring(0, 16) + '…' : null;
+                const txHash = rec.tx_hash || null;
                 const ipfsCid = rec.ipfs_cid || null;
                 const ts = rec.timestamp ? new Date(rec.timestamp).toLocaleString() : '—';
                 const meta = rec.metadata || {};
+
+                // tx_hash row — clickable link when blockchain is real
+                let txRow = '';
+                if (txHash) {
+                    const txShort = txHash.substring(0, 16) + '…';
+                    if (_currentExplorerUrl) {
+                        txRow = `<div class="prov-hash-row">
+                            <span class="prov-hash-label">Tx Hash</span>
+                            <a class="prov-hash prov-tx prov-link" href="${_currentExplorerUrl}/tx/${encodeURIComponent(txHash)}" target="_blank" rel="noopener" title="${escapeHtml(txHash)}">${escapeHtml(txShort)} ↗</a>
+                            <button class="prov-copy-btn" data-copy="${escapeHtml(txHash)}" title="Copy full hash">⧉</button>
+                        </div>`;
+                    } else {
+                        txRow = `<div class="prov-hash-row">
+                            <span class="prov-hash-label">Tx Hash <span class="prov-mock-badge">(mock)</span></span>
+                            <code class="prov-hash prov-tx" title="${escapeHtml(txHash)}">${escapeHtml(txShort)}</code>
+                            <button class="prov-copy-btn" data-copy="${escapeHtml(txHash)}" title="Copy full hash">⧉</button>
+                        </div>`;
+                    }
+                }
+
+                // IPFS CID row — clickable link when IPFS is real
+                let ipfsRow = '';
+                if (ipfsCid) {
+                    const cidShort = ipfsCid.substring(0, 20) + '…';
+                    if (_currentIpfsEnabled) {
+                        ipfsRow = `<div class="prov-hash-row">
+                            <span class="prov-hash-label">IPFS CID</span>
+                            <a class="prov-hash prov-ipfs prov-link" href="https://ipfs.io/ipfs/${encodeURIComponent(ipfsCid)}" target="_blank" rel="noopener" title="${escapeHtml(ipfsCid)}">${escapeHtml(cidShort)} ↗</a>
+                            <button class="prov-copy-btn" data-copy="${escapeHtml(ipfsCid)}" title="Copy full CID">⧉</button>
+                        </div>`;
+                    } else {
+                        ipfsRow = `<div class="prov-hash-row">
+                            <span class="prov-hash-label">IPFS CID <span class="prov-mock-badge">(mock)</span></span>
+                            <code class="prov-hash prov-ipfs" title="${escapeHtml(ipfsCid)}">${escapeHtml(cidShort)}</code>
+                            <button class="prov-copy-btn" data-copy="${escapeHtml(ipfsCid)}" title="Copy full CID">⧉</button>
+                        </div>`;
+                    }
+                }
 
                 let metaHtml = '';
                 if (meta.filename) metaHtml += `<span class="prov-meta-item">File: ${escapeHtml(meta.filename)}</span>`;
@@ -897,29 +952,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="prov-card-body">
                         <div class="prov-hash-row">
                             <span class="prov-hash-label">Content Hash</span>
-                            <code class="prov-hash" title="${rec.content_hash}">${shortHash}</code>
+                            <code class="prov-hash" title="${escapeHtml(rec.content_hash)}">${escapeHtml(shortHash)}</code>
                             <button class="prov-copy-btn" data-copy="${escapeHtml(rec.content_hash)}" title="Copy full hash">⧉</button>
                         </div>
                         <div class="prov-hash-row">
                             <span class="prov-hash-label">Record Hash</span>
-                            <code class="prov-hash" title="${rec.record_hash}">${shortRecord}</code>
+                            <code class="prov-hash" title="${escapeHtml(rec.record_hash)}">${escapeHtml(shortRecord)}</code>
                             <button class="prov-copy-btn" data-copy="${escapeHtml(rec.record_hash)}" title="Copy full hash">⧉</button>
                         </div>
-                        ${txHash ? `<div class="prov-hash-row">
-                            <span class="prov-hash-label">Tx Hash</span>
-                            <code class="prov-hash prov-tx" title="${rec.tx_hash}">${txHash}</code>
-                            <button class="prov-copy-btn" data-copy="${escapeHtml(rec.tx_hash)}" title="Copy full hash">⧉</button>
-                        </div>` : ''}
-                        ${ipfsCid ? `<div class="prov-hash-row">
-                            <span class="prov-hash-label">IPFS CID</span>
-                            <code class="prov-hash prov-ipfs" title="${ipfsCid}">${ipfsCid.substring(0, 20)}…</code>
-                            <button class="prov-copy-btn" data-copy="${escapeHtml(ipfsCid)}" title="Copy full CID">⧉</button>
-                        </div>` : ''}
+                        ${txRow}
+                        ${ipfsRow}
                         ${metaHtml ? `<div class="prov-meta">${metaHtml}</div>` : ''}
                     </div>
                 `;
 
-                // Attach copy handlers for this card
                 card.querySelectorAll('.prov-copy-btn').forEach(btn => {
                     btn.addEventListener('click', () => {
                         const text = btn.dataset.copy;
@@ -931,7 +977,6 @@ document.addEventListener('DOMContentLoaded', () => {
                                 btn.classList.remove('prov-copy-btn--copied');
                             }, 1500);
                         }).catch(() => {
-                            // Fallback for browsers without clipboard API
                             const ta = document.createElement('textarea');
                             ta.value = text;
                             ta.style.position = 'fixed';
@@ -958,6 +1003,71 @@ document.addEventListener('DOMContentLoaded', () => {
             provLog2.add('Failed to load provenance records: ' + String(err).substring(0, 100), 'error');
             provenanceLoading.classList.add('hidden');
             provenanceTimeline.innerHTML = `<div class="empty-state" style="color:#f87171;">Error: ${escapeHtml(String(err))}</div>`;
+        }
+    });
+
+    // Export full chain JSON
+    btnExportJson.addEventListener('click', () => {
+        if (!_currentProvPaperId) return;
+        window.location.href = `/api/provenance/${encodeURIComponent(_currentProvPaperId)}/export`;
+    });
+
+    // Download structured proof document
+    btnDownloadProof.addEventListener('click', () => {
+        if (!_currentProvPaperId) return;
+        window.location.href = `/api/provenance/${encodeURIComponent(_currentProvPaperId)}/proof`;
+    });
+
+    // Verify hash tool
+    const btnVerifyHash = document.getElementById('btn-verify-hash');
+    const verifyHashInput = document.getElementById('verify-hash-input');
+    const verifyHashResult = document.getElementById('verify-hash-result');
+
+    btnVerifyHash.addEventListener('click', async () => {
+        const hash = verifyHashInput.value.trim().toLowerCase();
+        if (!hash) { verifyHashInput.focus(); return; }
+
+        verifyHashResult.className = 'verify-result';
+        verifyHashResult.textContent = 'Searching…';
+        verifyHashResult.classList.remove('hidden');
+
+        try {
+            const res = await fetch('/api/provenance/verify-hash', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content_hash: hash }),
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || `HTTP ${res.status}`);
+            }
+            const data = await res.json();
+
+            if (data.found) {
+                const matchLines = data.matches.map(m => {
+                    const ts = m.timestamp ? new Date(m.timestamp).toLocaleString() : '—';
+                    const txNote = m.tx_hash ? ` · tx: ${m.tx_hash.substring(0,12)}…` : '';
+                    const ipfsNote = m.ipfs_cid ? ` · IPFS: ${m.ipfs_cid.substring(0,14)}…` : '';
+                    return `<div class="verify-match">
+                        <span class="verify-match-icon">✓</span>
+                        <div>
+                            <strong>${escapeHtml(m.paper_title)}</strong>
+                            <span class="verify-match-meta">${escapeHtml(m.record_type.replace('_',' '))} · ${ts}${txNote}${ipfsNote}</span>
+                        </div>
+                    </div>`;
+                }).join('');
+                verifyHashResult.innerHTML = `<div class="verify-found">
+                    <p class="verify-found-title">✓ Hash verified — found in ${data.match_count} record${data.match_count !== 1 ? 's' : ''}</p>
+                    ${matchLines}
+                </div>`;
+                verifyHashResult.className = 'verify-result verify-result--found';
+            } else {
+                verifyHashResult.innerHTML = `<p>✗ Hash not found in any provenance record. This content has not been registered, or was registered in a different session.</p>`;
+                verifyHashResult.className = 'verify-result verify-result--notfound';
+            }
+        } catch (err) {
+            verifyHashResult.textContent = 'Error: ' + String(err).substring(0, 120);
+            verifyHashResult.className = 'verify-result verify-result--error';
         }
     });
 

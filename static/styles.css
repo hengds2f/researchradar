@@ -1054,3 +1054,172 @@ textarea {
     border-width: 2px;
     flex-shrink: 0;
 }
+
+/* ================================================================== */
+/* Secondary button                                                    */
+/* ================================================================== */
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-main);
+    border: 1px solid var(--glass-border);
+    padding: 0.6rem 1.1rem;
+    border-radius: 0.5rem;
+    font-weight: 500;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, transform 0.15s;
+    font-family: inherit;
+    display: inline-block;
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.11);
+    border-color: rgba(255, 255, 255, 0.22);
+    transform: translateY(-1px);
+}
+
+.btn-secondary:active {
+    transform: translateY(0);
+}
+
+/* ================================================================== */
+/* Provenance — export / proof actions                                 */
+/* ================================================================== */
+
+.provenance-actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+}
+
+/* Styled text input (used in verify-hash panel) */
+.styled-input {
+    width: 100%;
+    background: rgba(0,0,0,0.2);
+    border: 1px solid var(--glass-border);
+    color: var(--text-main);
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    font-family: 'Courier New', monospace;
+    font-size: 0.875rem;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.styled-input:focus {
+    border-color: var(--primary);
+}
+
+/* Provenance — mock badge shown next to hash labels */
+.prov-mock-badge {
+    font-size: 0.62rem;
+    font-weight: 600;
+    background: rgba(148,163,184,0.15);
+    color: #94a3b8;
+    padding: 0.05rem 0.35rem;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+    margin-left: 0.25rem;
+}
+
+/* Provenance — live link in timeline cards */
+.prov-link {
+    text-decoration: none;
+    transition: opacity 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+}
+
+.prov-link:hover {
+    opacity: 0.8;
+    text-decoration: underline;
+}
+
+/* ================================================================== */
+/* Provenance — verify hash tool                                       */
+/* ================================================================== */
+
+.verify-hash-panel {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--glass-border);
+}
+
+.verify-hash-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.verify-scope-note {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.verify-result {
+    padding: 0.85rem 1rem;
+    border-radius: 0.65rem;
+    font-size: 0.875rem;
+    margin-top: 0.5rem;
+    animation: fadeIn 0.25s ease-out;
+}
+
+.verify-result--found {
+    background: rgba(16, 185, 129, 0.08);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #a7f3d0;
+}
+
+.verify-result--notfound {
+    background: rgba(239, 68, 68, 0.07);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    color: #fca5a5;
+}
+
+.verify-result--error {
+    background: rgba(245, 158, 11, 0.07);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    color: #fcd34d;
+}
+
+.verify-found-title {
+    font-weight: 600;
+    margin-bottom: 0.6rem;
+    color: #6ee7b7;
+}
+
+.verify-match {
+    display: flex;
+    gap: 0.6rem;
+    align-items: flex-start;
+    padding: 0.4rem 0;
+    border-top: 1px solid rgba(16, 185, 129, 0.12);
+}
+
+.verify-match-icon {
+    color: #4ade80;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+}
+
+.verify-match strong {
+    display: block;
+    font-size: 0.85rem;
+    color: #e2e8f0;
+    margin-bottom: 0.15rem;
+}
+
+.verify-match-meta {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    font-family: monospace;
+}

@@ -372,6 +372,11 @@
 
                     <div id="provenance-log" class="activity-log hidden"></div>
 
+                    <div id="provenance-actions" class="provenance-actions hidden">
+                        <button id="btn-export-json" class="btn-secondary">⬇ Export Chain JSON</button>
+                        <button id="btn-download-proof" class="btn-secondary">📜 Download Proof Doc</button>
+                    </div>
+
                     <div id="chain-status" class="chain-status hidden">
                         <div class="chain-status-indicator" id="chain-indicator"></div>
                         <div class="chain-status-text">
@@ -400,6 +405,8 @@
                                 <li><strong>📝 Summary</strong> — Records when the AI generated a synthesis or analysis output</li>
                                 <li><strong>🤖 Agent Output</strong> — Records the result of an agent workflow run, including its quality score</li>
                                 <li>The <em>Content Hash</em> is a fingerprint of the actual data; the <em>Record Hash</em> links this record to the previous one in the chain</li>
+                                <li>When a real blockchain is configured, <em>Tx Hash</em> becomes a live link to the block explorer</li>
+                                <li>When IPFS is enabled, <em>IPFS CID</em> becomes a link to the public gateway so anyone can retrieve the file</li>
                                 <li>Click the copy button (⧉) next to any hash to copy it to your clipboard</li>
                             </ul>
                         </div>
@@ -412,6 +419,20 @@
 
                     <div id="provenance-timeline" class="provenance-timeline">
                         <div class="empty-state">Select a paper to view its provenance chain.</div>
+                    </div>
+
+                    <div class="verify-hash-panel">
+                        <h3>Verify a Hash</h3>
+                        <p class="subtitle">Paste a SHA-256 content hash to check if it exists in the provenance chain — usable by any external system.</p>
+                        <div class="form-group">
+                            <label for="verify-hash-input">Content Hash (SHA-256 hex)</label>
+                            <input type="text" id="verify-hash-input" class="styled-input" placeholder="e.g. a1b2c3d4e5f6…" spellcheck="false" autocomplete="off">
+                        </div>
+                        <div class="verify-hash-row">
+                            <button id="btn-verify-hash" class="btn-secondary">🔍 Verify Hash</button>
+                            <span class="verify-scope-note">Searches all papers in this session</span>
+                        </div>
+                        <div id="verify-hash-result" class="verify-result hidden"></div>
                     </div>
                 </div>
             </div>
