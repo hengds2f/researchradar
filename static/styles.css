@@ -883,3 +883,174 @@ textarea {
     padding: 0.1rem 0.5rem;
     border-radius: 999px;
 }
+
+/* ================================================================== */
+/* Tool Descriptions                                                   */
+/* ================================================================== */
+
+.tool-info {
+    background: rgba(59, 130, 246, 0.05);
+    border: 1px solid rgba(59, 130, 246, 0.18);
+    border-radius: 0.65rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.85rem;
+    overflow: hidden;
+}
+
+.tool-info summary {
+    cursor: pointer;
+    padding: 0.65rem 1rem;
+    color: #93c5fd;
+    font-weight: 500;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    user-select: none;
+    outline: none;
+}
+
+.tool-info summary::-webkit-details-marker { display: none; }
+
+.tool-info summary::before {
+    content: '▶';
+    font-size: 0.65rem;
+    transition: transform 0.2s;
+    display: inline-block;
+}
+
+.tool-info[open] summary::before {
+    transform: rotate(90deg);
+}
+
+.tool-info-body {
+    padding: 0 1rem 0.85rem 1rem;
+    color: var(--text-muted);
+    line-height: 1.7;
+    border-top: 1px solid rgba(59, 130, 246, 0.12);
+}
+
+.tool-info-body p {
+    margin-bottom: 0.5rem;
+}
+
+.tool-info-body ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.tool-info-body ul li {
+    padding: 0.2rem 0 0.2rem 1.4rem;
+    position: relative;
+    font-size: 0.83rem;
+    background: none !important;
+    border: none !important;
+}
+
+.tool-info-body ul li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: #3b82f6;
+    font-size: 0.8rem;
+}
+
+.tool-info-body .agent-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.25rem 0;
+    font-size: 0.83rem;
+}
+
+.tool-info-body .agent-row strong {
+    color: var(--text-main);
+    white-space: nowrap;
+}
+
+/* ================================================================== */
+/* Activity / Live Status Log                                          */
+/* ================================================================== */
+
+.activity-log {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 0.65rem;
+    padding: 0.6rem 0.85rem;
+    margin-top: 0.85rem;
+    max-height: 220px;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+}
+
+.log-entry {
+    display: grid;
+    grid-template-columns: 1.2rem 3.8rem 1fr;
+    align-items: start;
+    gap: 0.4rem;
+    padding: 0.28rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    animation: fadeInLog 0.25s ease-out;
+    line-height: 1.45;
+}
+
+.log-entry:last-child { border-bottom: none; }
+
+@keyframes fadeInLog {
+    from { opacity: 0; transform: translateX(-6px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+.log-icon {
+    text-align: center;
+    font-size: 0.8rem;
+}
+
+.log-time {
+    font-size: 0.68rem;
+    color: rgba(148, 163, 184, 0.45);
+    padding-top: 0.05rem;
+    font-family: monospace;
+}
+
+.log-msg {
+    font-size: 0.8rem;
+    flex: 1;
+}
+
+.log-info    .log-msg { color: #93c5fd; }
+.log-success .log-msg { color: #6ee7b7; }
+.log-error   .log-msg { color: #fca5a5; }
+.log-warning .log-msg { color: #fcd34d; }
+.log-muted   .log-msg { color: var(--text-muted); }
+
+/* Agent pipeline step descriptions */
+.step-desc {
+    font-size: 0.7rem;
+    color: rgba(148, 163, 184, 0.6);
+    line-height: 1.35;
+    margin-top: 0.1rem;
+    max-width: 220px;
+}
+
+/* Live status bar (shown during operations) */
+.live-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.85rem;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: 0.5rem;
+    margin-top: 0.75rem;
+    font-size: 0.82rem;
+    color: #93c5fd;
+}
+
+.live-status-bar .spinner {
+    width: 14px;
+    height: 14px;
+    border-width: 2px;
+    flex-shrink: 0;
+}

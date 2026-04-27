@@ -1,4 +1,66 @@
 document.addEventListener('DOMContentLoaded', () => {
+
+    // -----------------------------------------------------------------------
+    // ActivityLog — real-time status feed for each tool
+    // -----------------------------------------------------------------------
+    class ActivityLog {
+        constructor(elementId) {
+            this.el = document.getElementById(elementId);
+        }
+
+        _time() {
+            return new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+        show() { if (this.el) this.el.classList.remove('hidden'); }
+        hide() { if (this.el) this.el.classList.add('hidden'); }
+
+        clear() {
+            if (this.el) { this.el.innerHTML = ''; this.show(); }
+        }
+
+        add(msg, type = 'info') {
+            if (!this.el) return null;
+            this.show();
+            const icons = { info: '🔄', success: '✅', error: '❌', warning: '⚠️', muted: '•' };
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.innerHTML = `<span class="log-icon">${icons[type] || '•'}</span><span class="log-time">${this._time()}</span><span class="log-msg">${msg}</span>`;
+            this.el.appendChild(entry);
+            this.el.scrollTop = this.el.scrollHeight;
+            return entry;
+        }
+
+        // Replace the last entry instead of adding a new one
+        updateLast(msg, type) {
+            if (!this.el) return;
+            const entries = this.el.querySelectorAll('.log-entry');
+            if (!entries.length) { this.add(msg, type); return; }
+            const last = entries[entries.length - 1];
+            const icons = { info: '🔄', success: '✅', error: '❌', warning: '⚠️', muted: '•' };
+            if (type) last.className = `log-entry log-${type}`;
+            if (type) last.querySelector('.log-icon').textContent = icons[type] || '•';
+            last.querySelector('.log-msg').textContent = msg;
+        }
+    }
+
+    // Timed progress simulation — shows animated steps while waiting for the API.
+    // Returns an array of timeout IDs so they can be cancelled when the API resolves.
+    function simulateProgress(log, steps, intervalMs = 1400) {
+        const ids = [];
+        steps.forEach((step, i) => {
+            const id = setTimeout(() => {
+                if (i === 0) { log.clear(); log.add(step, 'info'); }
+                else         { log.updateLast(steps[i - 1], 'muted'); log.add(step, 'info'); }
+            }, i * intervalMs);
+            ids.push(id);
+        });
+        return ids;
+    }
+
+    function cancelSimulation(ids) { ids.forEach(id => clearTimeout(id)); }
+
+    // -----------------------------------------------------------------------
     // Nav logic
     const navSynthesis = document.getElementById('nav-synthesis');
     const navCluster = document.getElementById('nav-cluster');
@@ -86,6 +148,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         dropZone.querySelector('p').textContent = 'Uploading and Parsing...';
 
+        const uploadLog = new ActivityLog('upload-log');
+        const uploadSteps = [
+            'Reading your file and extracting text…',
+            'Identifying paper sections (Introduction, Methods, Results…)',
+            'Converting text into searchable vectors (embeddings)…',
+            'Indexing content into the knowledge base…',
+        ];
+        const simIds = simulateProgress(uploadLog, uploadSteps, 1200);
+
         fetch('/api/upload', {
             method: 'POST',
             body: formData
@@ -98,12 +169,18 @@ document.addEventListener('DOMContentLoaded', () => {
             return res.json();
         })
         .then(data => {
+            cancelSimulation(simIds);
             if (data.papers) {
+                uploadLog.updateLast(uploadSteps[uploadSteps.length - 1], 'muted');
+                const count = data.papers.length;
+                uploadLog.add(`Paper${count > 1 ? 's' : ''} added successfully — ${count} paper${count > 1 ? 's' : ''} now in your knowledge base`, 'success');
                 updatePaperList(data.papers);
                 dropZone.querySelector('p').textContent = 'Drag & drop more PDFs here, or click to browse';
             }
         })
         .catch(err => {
+            cancelSimulation(simIds);
+            uploadLog.add('Upload failed: ' + String(err).substring(0, 100), 'error');
             console.error('Upload failed', err);
             dropZone.querySelector('p').textContent = 'Upload failed: ' + String(err).substring(0, 50);
         });
@@ -144,6 +221,22 @@ document.addEventListener('DOMContentLoaded', () => {
         loadingSpinner.classList.remove('hidden');
         resultContent.classList.add('hidden');
 
+        const queryLog = new ActivityLog('query-log');
+        const modeLabels = {
+            synthesis: 'Synthesis — combining findings across all papers',
+            methodology: 'Methodology Comparison — comparing how studies were conducted',
+            gap: 'Research Gap Analysis — identifying unanswered questions',
+            qa: 'General Q&A — searching for a direct answer',
+        };
+        const querySteps = [
+            `Starting analysis in ${modeLabels[mode] || mode} mode…`,
+            'Searching your knowledge base for relevant passages…',
+            'Retrieving the most informative sections…',
+            'Sending evidence to the AI to draft a response…',
+            'Generating your answer — almost there…',
+        ];
+        const simIds = simulateProgress(queryLog, querySteps, 1300);
+
         try {
             const res = await fetch('/api/query', {
                 method: 'POST',
@@ -157,6 +250,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             
             const data = await res.json();
+
+            cancelSimulation(simIds);
+            queryLog.updateLast(querySteps[querySteps.length - 1], 'muted');
+            queryLog.add('Response generated successfully', 'success');
             
             loadingSpinner.classList.add('hidden');
             resultContent.classList.remove('hidden');
@@ -168,6 +265,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             
         } catch (err) {
+            cancelSimulation(simIds);
+            queryLog.add('Error generating response: ' + String(err).substring(0, 120), 'error');
             loadingSpinner.classList.add('hidden');
             resultContent.classList.remove('hidden');
             resultContent.innerHTML = '<div class="empty-state">Error generating insights: ' + String(err).substring(0, 500) + '</div>';
@@ -182,15 +281,29 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const container = document.getElementById('d3-container');
         container.innerHTML = '<div style="padding: 2rem; color: #94a3b8;">Loading cluster map...</div>';
+
+        const clusterLog = new ActivityLog('cluster-log');
+        const simIds = simulateProgress(clusterLog, [
+            'Loading paper embeddings from the knowledge base…',
+            'Calculating similarity scores between papers…',
+            'Grouping papers into topic clusters…',
+            'Reducing to 2D for visualisation…',
+            'Building the interactive map…',
+        ], 1100);
         
         try {
             const res = await fetch('/api/clustering');
             const data = await res.json();
+
+            cancelSimulation(simIds);
             
             if (!data.nodes || data.nodes.length === 0) {
+                clusterLog.add('Not enough papers to cluster yet — upload at least 2 papers', 'warning');
                 container.innerHTML = '<div style="padding: 2rem; color: #94a3b8;">Not enough papers uploaded to cluster yet.</div>';
                 return;
             }
+
+            clusterLog.add(`Map built — ${data.nodes.length} paper${data.nodes.length > 1 ? 's' : ''} across ${new Set(data.nodes.map(n => n.group)).size} topic cluster${new Set(data.nodes.map(n => n.group)).size > 1 ? 's' : ''}`, 'success');
 
             container.innerHTML = '';
             
@@ -270,6 +383,9 @@ document.addEventListener('DOMContentLoaded', () => {
             d3Rendered = true;
 
         } catch (e) {
+            const clusterLog2 = new ActivityLog('cluster-log');
+            cancelSimulation([]);
+            clusterLog2.add('Failed to load cluster map — ' + String(e).substring(0, 80), 'error');
             container.innerHTML = '<div style="padding: 2rem; color: #94a3b8;">Failed to load cluster map.</div>';
             console.error(e);
         }
@@ -326,6 +442,15 @@ document.addEventListener('DOMContentLoaded', () => {
         analysisLoading.classList.remove('hidden');
         btnRunAnalysis.disabled = true;
 
+        const analysisLog = new ActivityLog('analysis-log');
+        const simIds = simulateProgress(analysisLog, [
+            'Loading the selected paper from your knowledge base…',
+            'Scanning each paragraph and classifying its section type…',
+            'Calculating confidence scores for each classification…',
+            'Searching for limitation statements and caveats…',
+            'Generating plain-English summaries for each section…',
+        ], 1500);
+
         try {
             const res = await fetch(`/api/paper/${paperId}/ml-analysis`, { method: 'POST' });
             if (!res.ok) {
@@ -333,6 +458,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(err.error || 'ML analysis failed');
             }
             const data = await res.json();
+
+            cancelSimulation(simIds);
+            analysisLog.updateLast('Generating plain-English summaries for each section…', 'muted');
+
+            const secCount = (data.classified_sections || []).length;
+            const limCount = (data.limitations || []).length;
+            analysisLog.add(`Analysis complete — ${secCount} sections classified, ${limCount} limitation${limCount !== 1 ? 's' : ''} detected`, 'success');
 
             analysisLoading.classList.add('hidden');
 
@@ -369,6 +501,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
         } catch (err) {
+            cancelSimulation(simIds);
+            const analysisLog2 = new ActivityLog('analysis-log');
+            analysisLog2.add('Analysis failed: ' + String(err).substring(0, 120), 'error');
             analysisLoading.classList.add('hidden');
             sectionsTable.innerHTML = `<div class="empty-state" style="color:#f87171;">Error: ${escapeHtml(String(err).substring(0, 300))}</div>`;
         } finally {
@@ -534,6 +669,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Agent-step descriptions for the live log
+    const AGENT_STEP_MSGS = {
+        router:    'Router is reading your question and choosing the best analysis strategy…',
+        retrieval: 'Retrieval is searching your papers for the most relevant passages…',
+        synthesis: 'Synthesis is combining the evidence into a drafted answer…',
+        critic:    'Critic is reviewing the draft for weak claims and missing evidence…',
+        writer:    'Writer is polishing the final response for clarity and accuracy…',
+    };
+
+    const AGENT_DONE_MSGS = {
+        router:    'Router done — strategy selected',
+        retrieval: 'Retrieval done — evidence collected from your papers',
+        synthesis: 'Synthesis done — draft answer created',
+        critic:    'Critic done — quality review complete',
+        writer:    'Writer done — final response ready',
+    };
+
     btnAgentRun.addEventListener('click', async () => {
         const query = agentQuery.value.trim();
         if (!query) { agentQuery.focus(); return; }
@@ -546,6 +698,21 @@ document.addEventListener('DOMContentLoaded', () => {
         agentLoading.classList.remove('hidden');
         btnAgentRun.disabled = true;
         resetPipeline();
+
+        const agentLog = new ActivityLog('agent-log');
+        agentLog.clear();
+        agentLog.add('Starting the 5-agent research pipeline…', 'info');
+
+        // Simulate the pipeline steps advancing in real time while the API runs
+        const agentOrder = ['router', 'retrieval', 'synthesis', 'critic', 'writer'];
+        const simIds = [];
+        agentOrder.forEach((agent, i) => {
+            // Mark as "running" at staggered intervals
+            simIds.push(setTimeout(() => {
+                updatePipelineStep(agent, 'running');
+                agentLog.add(AGENT_STEP_MSGS[agent], 'info');
+            }, i * 2200));
+        });
 
         try {
             const res = await fetch('/api/research/agent-run', {
@@ -561,8 +728,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const state = await res.json();
 
+            cancelSimulation(simIds);
             agentLoading.classList.add('hidden');
             renderPipelineFromState(state.agent_states);
+
+            // Log final step outcomes
+            agentOrder.forEach(agent => {
+                const info = (state.agent_states || {})[agent] || {};
+                if (info.status === 'completed') agentLog.add(AGENT_DONE_MSGS[agent], 'success');
+                else if (info.status === 'failed')   agentLog.add(`${capitalise(agent)} encountered an issue — pipeline continued`, 'warning');
+            });
 
             // Render critique panel
             const critique = state.critique || {};
@@ -591,10 +766,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 agentResult.innerHTML = `<div class="empty-state" style="color:#f87171;">Error: ${escapeHtml(state.error)}</div>`;
             } else {
                 agentResult.innerHTML = marked.parse(response);
+                agentLog.add('Pipeline complete — your research answer is ready below', 'success');
             }
 
         } catch (err) {
+            cancelSimulation(simIds);
             agentLoading.classList.add('hidden');
+            agentLog.add('Pipeline failed: ' + String(err).substring(0, 120), 'error');
             agentResult.innerHTML = `<div class="empty-state" style="color:#f87171;">Error: ${escapeHtml(String(err))}</div>`;
         } finally {
             btnAgentRun.disabled = false;
@@ -649,22 +827,38 @@ document.addEventListener('DOMContentLoaded', () => {
         provenanceTimeline.innerHTML = '';
         chainStatus.classList.add('hidden');
 
+        const provLog = new ActivityLog('provenance-log');
+        const simIds = simulateProgress(provLog, [
+            'Fetching provenance records from the ledger…',
+            'Verifying the integrity of the hash chain…',
+            'Checking each record\'s fingerprint against the stored values…',
+        ], 1000);
+
         try {
             const res = await fetch(`/api/provenance/${paperId}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
 
+            cancelSimulation(simIds);
             provenanceLoading.classList.add('hidden');
 
             // Chain status
             const cv = data.chain_verification || {};
             const isValid = cv.valid !== false;
+            const recCount = cv.record_count || 0;
+
+            if (isValid) {
+                provLog.add(`Chain verified — ${recCount} record${recCount !== 1 ? 's' : ''} intact, no tampering detected`, 'success');
+            } else {
+                provLog.add(`Chain integrity issue detected: ${cv.message || 'chain may be compromised'}`, 'error');
+            }
+
             chainIndicator.className = `chain-status-indicator ${isValid ? 'chain-valid' : 'chain-invalid'}`;
             chainValidLabel.textContent = isValid ? '✓ Chain Intact' : '✗ Chain Compromised';
             chainMessage.textContent = cv.message || '';
             chainModeBadge.textContent = `Blockchain: ${data.blockchain_mode || 'mock'}`;
             chainIpfsBadge.textContent = `IPFS: ${data.ipfs_enabled ? 'enabled' : 'mock'}`;
-            chainRecordCount.textContent = `${cv.record_count || 0} record(s)`;
+            chainRecordCount.textContent = `${recCount} record(s)`;
             chainStatus.classList.remove('hidden');
 
             // Timeline
@@ -759,6 +953,9 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
         } catch (err) {
+            cancelSimulation([]);
+            const provLog2 = new ActivityLog('provenance-log');
+            provLog2.add('Failed to load provenance records: ' + String(err).substring(0, 100), 'error');
             provenanceLoading.classList.add('hidden');
             provenanceTimeline.innerHTML = `<div class="empty-state" style="color:#f87171;">Error: ${escapeHtml(String(err))}</div>`;
         }

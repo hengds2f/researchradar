@@ -36,12 +36,27 @@
                 <div class="col left-col glass-panel">
                     <h2>Knowledge Base</h2>
                     <p class="subtitle">Upload academic PDFs to build your corpus.</p>
-                    
+
+                    <details class="tool-info">
+                        <summary>How this works</summary>
+                        <div class="tool-info-body">
+                            <p>Drop in your research papers and ResearchRadar handles everything automatically:</p>
+                            <ul>
+                                <li>Reads and extracts all text from your PDF or TXT file</li>
+                                <li>Automatically identifies sections like Introduction, Methods, Results, and Discussion</li>
+                                <li>Builds a searchable knowledge base so the AI can find relevant passages instantly</li>
+                                <li>Supports multiple papers — the more you upload, the richer the analysis</li>
+                            </ul>
+                        </div>
+                    </details>
+
                     <div class="upload-zone" id="drop-zone">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
                         <p>Drag & drop PDFs here, or click to browse</p>
                         <input type="file" id="file-input" multiple accept=".pdf, .txt" style="display: none;">
                     </div>
+
+                    <div id="upload-log" class="activity-log hidden"></div>
 
                     <div class="uploaded-list">
                         <h3>Uploaded Papers</h3>
@@ -54,7 +69,20 @@
                 <div class="col right-col glass-panel">
                     <h2>AI Assistant</h2>
                     <p class="subtitle">Query your corpus with section-aware analysis.</p>
-                    
+
+                    <details class="tool-info">
+                        <summary>How this works</summary>
+                        <div class="tool-info-body">
+                            <p>Ask any research question and the AI reads across all your uploaded papers to form an answer. Choose a mode to focus the analysis:</p>
+                            <ul>
+                                <li><strong>Synthesis</strong> — Combines common findings and themes from all papers into one response</li>
+                                <li><strong>Methodology Comparison</strong> — Compares how each study was conducted (sample sizes, approaches, tools used)</li>
+                                <li><strong>Research Gap Analysis</strong> — Identifies what questions remain unanswered in the field</li>
+                                <li><strong>General Q&amp;A</strong> — Answers any specific question using your uploaded papers as a reference</li>
+                            </ul>
+                        </div>
+                    </details>
+
                     <div class="query-area">
                         <div class="form-group">
                             <label for="query-mode">Mode</label>
@@ -79,6 +107,7 @@
                             <div class="spinner"></div>
                             <span>Synthesizing...</span>
                         </div>
+                        <div id="query-log" class="activity-log hidden"></div>
                         <div id="result-content" class="markdown-body">
                             <!-- LLM result goes here -->
                             <div class="empty-state">Query results will appear here.</div>
@@ -93,6 +122,22 @@
             <div class="glass-panel full-width">
                 <h2>Semantic Clustering Map</h2>
                 <p class="subtitle">Visualizing topic groupings across the uploaded corpus based on vector embeddings.</p>
+
+                <details class="tool-info">
+                    <summary>How this works</summary>
+                    <div class="tool-info-body">
+                        <p>This interactive map shows how your papers relate to each other by meaning — not just keywords:</p>
+                        <ul>
+                            <li>Each dot represents one of your uploaded papers</li>
+                            <li>Papers that discuss similar topics are placed closer together</li>
+                            <li>Dots with the same colour belong to the same topic cluster</li>
+                            <li>Drag any dot to explore connections — hover to see the paper title</li>
+                            <li>Uses mathematical text embeddings (converting meaning into numbers) to measure similarity</li>
+                        </ul>
+                    </div>
+                </details>
+
+                <div id="cluster-log" class="activity-log hidden"></div>
                 <div id="d3-container" class="d3-canvas"></div>
             </div>
         </section>
@@ -104,6 +149,19 @@
                 <div class="col left-col glass-panel">
                     <h2>Section Classifier</h2>
                     <p class="subtitle">SciBERT-style zero-shot classification assigns scientific section labels with confidence scores.</p>
+
+                    <details class="tool-info">
+                        <summary>How this works</summary>
+                        <div class="tool-info-body">
+                            <p>This tool reads every paragraph in a paper and uses machine learning to classify it:</p>
+                            <ul>
+                                <li>Each paragraph is labelled with a section type (e.g., Introduction, Methods, Results)</li>
+                                <li>A confidence score (0–100%) shows how certain the model is about each label</li>
+                                <li>Two labels are shown: the original heading found in the paper, and the AI's predicted label</li>
+                                <li>This helps you quickly understand the structure of an unfamiliar paper</li>
+                            </ul>
+                        </div>
+                    </details>
 
                     <div class="form-group">
                         <label for="analysis-paper-select">Select Paper</label>
@@ -119,6 +177,8 @@
                         <span>Running ML analysis...</span>
                     </div>
 
+                    <div id="analysis-log" class="activity-log hidden"></div>
+
                     <div id="sections-table" class="sections-table"></div>
                 </div>
 
@@ -126,6 +186,18 @@
                 <div class="col right-col glass-panel">
                     <h2>Analysis Results</h2>
                     <p class="subtitle">Section distribution, detected limitations, and abstractive section summaries.</p>
+
+                    <details class="tool-info">
+                        <summary>What you'll see here</summary>
+                        <div class="tool-info-body">
+                            <p>After running the analysis, three panels appear:</p>
+                            <ul>
+                                <li><strong>Section Distribution chart</strong> — A bar chart showing how many paragraphs belong to each section type, giving you a visual fingerprint of the paper's structure</li>
+                                <li><strong>Detected Limitations</strong> — Sentences from the paper where the authors themselves flag weaknesses, caveats, or areas for future work</li>
+                                <li><strong>Section Summaries</strong> — Short plain-English summaries of each major section, generated by the AI so you can grasp the paper quickly</li>
+                            </ul>
+                        </div>
+                    </details>
 
                     <div id="section-chart-container" class="chart-container">
                         <h3>Section Distribution</h3>
@@ -154,6 +226,18 @@
                     <h2>Agent Workflow</h2>
                     <p class="subtitle">Run a multi-agent research pipeline: Router → Retrieval → Synthesis → Critic → Writer.</p>
 
+                    <details class="tool-info">
+                        <summary>How the 5-agent pipeline works</summary>
+                        <div class="tool-info-body">
+                            <p>Five specialised AI agents work together in sequence to produce a high-quality, well-evidenced answer:</p>
+                            <div class="agent-row"><strong>🧭 Router</strong>&nbsp;— Reads your question and decides the best strategy (e.g. compare methods, synthesise findings, or answer directly)</div>
+                            <div class="agent-row"><strong>🔍 Retrieval</strong>&nbsp;— Searches all your uploaded papers to find the most relevant paragraphs and quotes</div>
+                            <div class="agent-row"><strong>🧠 Synthesis</strong>&nbsp;— Reads the retrieved passages and drafts a comprehensive, cited answer</div>
+                            <div class="agent-row"><strong>🔬 Critic</strong>&nbsp;— Reviews the draft for weak claims, unsupported statements, or logical gaps, and scores its quality</div>
+                            <div class="agent-row"><strong>✍️ Writer</strong>&nbsp;— Rewrites the final response incorporating the critic's feedback for clarity and accuracy</div>
+                        </div>
+                    </details>
+
                     <div class="form-group">
                         <label for="agent-paper-select">Paper (optional)</label>
                         <select id="agent-paper-select" class="styled-select">
@@ -178,45 +262,52 @@
 
                     <button id="btn-agent-run" class="btn-primary">Run Agent Workflow</button>
 
+                    <div id="agent-log" class="activity-log hidden"></div>
+
                     <!-- Pipeline visualisation -->
                     <div id="agent-pipeline" class="agent-pipeline">
                         <div class="pipeline-step" data-agent="router">
                             <div class="step-dot"></div>
                             <div class="step-info">
-                                <span class="step-name">Router</span>
+                                <span class="step-name">🧭 Router</span>
                                 <span class="step-status">pending</span>
+                                <span class="step-desc">Decides the best strategy to answer your question</span>
                             </div>
                         </div>
                         <div class="pipeline-connector"></div>
                         <div class="pipeline-step" data-agent="retrieval">
                             <div class="step-dot"></div>
                             <div class="step-info">
-                                <span class="step-name">Retrieval</span>
+                                <span class="step-name">🔍 Retrieval</span>
                                 <span class="step-status">pending</span>
+                                <span class="step-desc">Searches your papers for the most relevant evidence</span>
                             </div>
                         </div>
                         <div class="pipeline-connector"></div>
                         <div class="pipeline-step" data-agent="synthesis">
                             <div class="step-dot"></div>
                             <div class="step-info">
-                                <span class="step-name">Synthesis</span>
+                                <span class="step-name">🧠 Synthesis</span>
                                 <span class="step-status">pending</span>
+                                <span class="step-desc">Combines the evidence into a coherent drafted answer</span>
                             </div>
                         </div>
                         <div class="pipeline-connector"></div>
                         <div class="pipeline-step" data-agent="critic">
                             <div class="step-dot"></div>
                             <div class="step-info">
-                                <span class="step-name">Critic</span>
+                                <span class="step-name">🔬 Critic</span>
                                 <span class="step-status">pending</span>
+                                <span class="step-desc">Reviews the draft for weak claims and missing evidence</span>
                             </div>
                         </div>
                         <div class="pipeline-connector"></div>
                         <div class="pipeline-step" data-agent="writer">
                             <div class="step-dot"></div>
                             <div class="step-info">
-                                <span class="step-name">Writer</span>
+                                <span class="step-name">✍️ Writer</span>
                                 <span class="step-status">pending</span>
+                                <span class="step-desc">Polishes the final response for clarity and accuracy</span>
                             </div>
                         </div>
                     </div>
@@ -256,6 +347,20 @@
                     <h2>Provenance Ledger</h2>
                     <p class="subtitle">Tamper-evident hash chain for uploaded papers and generated outputs.</p>
 
+                    <details class="tool-info">
+                        <summary>How this works</summary>
+                        <div class="tool-info-body">
+                            <p>Every action in ResearchRadar is automatically recorded with a unique digital fingerprint:</p>
+                            <ul>
+                                <li>When you upload a paper, a fingerprint (hash) of its content is saved</li>
+                                <li>When the AI generates a summary or answer, that output is also fingerprinted and linked to the previous record</li>
+                                <li>Each new record includes the previous record's hash — creating a chain that cannot be silently altered</li>
+                                <li>If any record is tampered with after the fact, the chain verification will flag it as compromised</li>
+                                <li>Think of it like a bank statement for your research activity — a permanent, tamper-proof audit trail</li>
+                            </ul>
+                        </div>
+                    </details>
+
                     <div class="form-group">
                         <label for="provenance-paper-select">Select Paper</label>
                         <select id="provenance-paper-select" class="styled-select">
@@ -264,6 +369,8 @@
                     </div>
 
                     <button id="btn-load-provenance" class="btn-primary" disabled>Load Provenance</button>
+
+                    <div id="provenance-log" class="activity-log hidden"></div>
 
                     <div id="chain-status" class="chain-status hidden">
                         <div class="chain-status-indicator" id="chain-indicator"></div>
@@ -283,6 +390,20 @@
                 <div class="col right-col glass-panel">
                     <h2>Provenance History</h2>
                     <p class="subtitle">Every upload, summary, and agent output is recorded with an immutable hash.</p>
+
+                    <details class="tool-info">
+                        <summary>Reading the timeline</summary>
+                        <div class="tool-info-body">
+                            <p>Each card in the timeline represents one recorded event:</p>
+                            <ul>
+                                <li><strong>📄 Upload</strong> — Records when a paper was added and its content fingerprint</li>
+                                <li><strong>📝 Summary</strong> — Records when the AI generated a synthesis or analysis output</li>
+                                <li><strong>🤖 Agent Output</strong> — Records the result of an agent workflow run, including its quality score</li>
+                                <li>The <em>Content Hash</em> is a fingerprint of the actual data; the <em>Record Hash</em> links this record to the previous one in the chain</li>
+                                <li>Click the copy button (⧉) next to any hash to copy it to your clipboard</li>
+                            </ul>
+                        </div>
+                    </details>
 
                     <div class="loading-state hidden" id="provenance-loading">
                         <div class="spinner"></div>
