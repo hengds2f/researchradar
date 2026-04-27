@@ -1,4 +1,5 @@
 import os
+import logging
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from werkzeug.utils import secure_filename
 import PyPDF2
@@ -12,10 +13,23 @@ from huggingface_hub import InferenceClient
 # ML analysis service
 from services.paper_ml import PaperMLService
 
+# Multi-agent orchestration
+from services.agent_orchestrator import AgentOrchestrator
+
+# Provenance / dApp layer
+from services.provenance_service import ProvenanceService
+from services.ipfs_service import IPFSService
+from services.blockchain_service import BlockchainService
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__, static_folder='static')
 
 # Environment configuration
 HF_TOKEN = os.environ.get("HF_TOKEN")
+PROVENANCE_ENABLED = os.environ.get("PROVENANCE_ENABLED", "true").lower() != "false"
+AGENT_ENABLED = os.environ.get("AGENT_ENABLED", "true").lower() != "false"
 
 if not HF_TOKEN:
     print("Warning: Missing HF_TOKEN environment variable. LLM Synthesis will fail.")
@@ -28,6 +42,17 @@ collection = chroma_client.get_or_create_collection(name="research_papers")
 ml_service = PaperMLService(HF_TOKEN)
 
 papers = {}
+
+# Initialize provenance services
+_ipfs_service = IPFSService()
+_blockchain_service = BlockchainService()
+provenance_service = ProvenanceService(
+    blockchain_service=_blockchain_service if PROVENANCE_ENABLED else None,
+    ipfs_service=_ipfs_service if PROVENANCE_ENABLED else None,
+)
+
+# Initialize multi-agent orchestrator (passes references to shared state)
+agent_orchestrator = AgentOrchestrator(HF_TOKEN, collection, papers)
 
 def extract_sections(text):
     text_clean = text.replace('\n', ' ')
@@ -116,13 +141,20 @@ def upload_pdf():
             paper_id = str(len(papers) + 1)
             papers[paper_id] = {
                 'id': paper_id,
-                'title': filename.replace('.pdf', ''),
+                'title': filename.replace('.pdf', '').replace('.txt', ''),
                 'filename': filename,
                 'chunk_types': chunk_types,
                 'sections': sections,   # stored for ML analysis
             }
             uploaded_papers.append(papers[paper_id])
-            
+
+            # Register provenance for this upload (non-blocking)
+            if PROVENANCE_ENABLED:
+                try:
+                    provenance_service.register_upload(paper_id, filename, text)
+                except Exception as prov_exc:
+                    logger.warning("Provenance registration failed for %s: %s", paper_id, prov_exc)
+
             # Inject documents into ChromaDB mapped with section_type metadata
             for i, s in enumerate(sections):
                 chunk_id = f"{paper_id}_chunk_{i}"
@@ -373,5 +405,121 @@ def paper_sections(paper_id):
     })
 
 
+# ---------------------------------------------------------------------------
+# Multi-agent research workflow endpoints
+# ---------------------------------------------------------------------------
+
+@app.route('/api/research/agent-run', methods=['POST'])
+def agent_run():
+    """Run the multi-agent research workflow.
+
+    Request JSON:
+        query   (str, required)   – The research question.
+        mode    (str, optional)   – synthesis | methodology | gap | qa (default: qa)
+        paper_id (str, optional)  – Restrict retrieval to a specific paper.
+    """
+    if not AGENT_ENABLED:
+        return jsonify({'error': 'Agent workflow is disabled (AGENT_ENABLED=false)'}), 503
+
+    data = request.get_json(silent=True) or {}
+    query = (data.get('query') or '').strip()
+    mode = data.get('mode', 'qa')
+    paper_id = data.get('paper_id') or None
+
+    if not query:
+        return jsonify({'error': 'query is required'}), 400
+
+    if paper_id and paper_id not in papers:
+        return jsonify({'error': f'paper_id {paper_id!r} not found'}), 404
+
+    try:
+        state = agent_orchestrator.run(query, mode, paper_id)
+    except Exception as exc:
+        logger.error("agent_run failed: %s", exc, exc_info=True)
+        return jsonify({'error': f'Agent workflow error: {exc}'}), 500
+
+    # Register provenance for the agent output (non-blocking)
+    if PROVENANCE_ENABLED and state.get('final_response'):
+        target_id = paper_id or 'general'
+        try:
+            provenance_service.register_agent_output(
+                target_id,
+                state.get('session_id', ''),
+                state,
+            )
+        except Exception as prov_exc:
+            logger.warning("Provenance registration failed for agent output: %s", prov_exc)
+
+    # Cache latest agent state on the paper when paper-specific
+    if paper_id and paper_id in papers:
+        papers[paper_id]['latest_agent_state'] = {
+            'session_id': state.get('session_id'),
+            'query': state.get('query'),
+            'mode': state.get('mode'),
+            'workflow_type': state.get('workflow_type'),
+            'agent_states': state.get('agent_states'),
+            'critique': state.get('critique'),
+            'provenance_hash': state.get('provenance_hash'),
+            'timestamp': state.get('timestamp'),
+        }
+
+    return jsonify(state)
+
+
+@app.route('/api/research/<paper_id>/agent-state', methods=['GET'])
+def get_agent_state(paper_id):
+    """Return the cached agent state for the most recent run on a paper."""
+    if paper_id not in papers:
+        return jsonify({'error': 'Paper not found'}), 404
+
+    agent_state = papers[paper_id].get('latest_agent_state')
+    return jsonify({'paper_id': paper_id, 'agent_state': agent_state})
+
+
+# ---------------------------------------------------------------------------
+# Provenance endpoints
+# ---------------------------------------------------------------------------
+
+@app.route('/api/provenance/register-upload', methods=['POST'])
+def provenance_register_upload():
+    """Manually trigger provenance registration for an already-uploaded paper."""
+    if not PROVENANCE_ENABLED:
+        return jsonify({'error': 'Provenance is disabled (PROVENANCE_ENABLED=false)'}), 503
+
+    data = request.get_json(silent=True) or {}
+    paper_id = (data.get('paper_id') or '').strip()
+
+    if not paper_id or paper_id not in papers:
+        return jsonify({'error': 'Valid paper_id required'}), 400
+
+    paper = papers[paper_id]
+    content = ' '.join(s['content'] for s in paper.get('sections', []))
+
+    try:
+        record = provenance_service.register_upload(
+            paper_id, paper['filename'], content
+        )
+    except Exception as exc:
+        logger.error("provenance_register_upload failed: %s", exc, exc_info=True)
+        return jsonify({'error': str(exc)}), 500
+
+    return jsonify(record)
+
+
+@app.route('/api/provenance/<paper_id>', methods=['GET'])
+def get_provenance(paper_id):
+    """Return the full provenance history and chain verification for a paper."""
+    history = provenance_service.get_history(paper_id)
+    verification = provenance_service.verify_chain(paper_id)
+    return jsonify({
+        'paper_id': paper_id,
+        'records': history,
+        'chain_verification': verification,
+        'blockchain_mode': 'real' if _blockchain_service.is_real_chain else 'mock',
+        'ipfs_enabled': _ipfs_service.is_enabled,
+    })
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=7860)
+

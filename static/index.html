@@ -24,6 +24,8 @@
             <button id="nav-synthesis" class="active">Synthesis</button>
             <button id="nav-cluster">Clustering Map</button>
             <button id="nav-analysis">Paper Analysis</button>
+            <button id="nav-agents">Agent Workflow</button>
+            <button id="nav-provenance">Provenance</button>
         </nav>
     </header>
 
@@ -139,6 +141,158 @@
                     <div id="summaries-panel" class="analysis-subpanel hidden">
                         <h3>Section Summaries</h3>
                         <div id="summaries-content" class="summaries-content"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+        <!-- Agent Workflow View -->
+        <section id="agents-view" class="view-section hidden">
+            <div class="two-col-layout">
+                <!-- Left: Query form -->
+                <div class="col left-col glass-panel">
+                    <h2>Agent Workflow</h2>
+                    <p class="subtitle">Run a multi-agent research pipeline: Router → Retrieval → Synthesis → Critic → Writer.</p>
+
+                    <div class="form-group">
+                        <label for="agent-paper-select">Paper (optional)</label>
+                        <select id="agent-paper-select" class="styled-select">
+                            <option value="">All papers (cross-paper)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="agent-mode">Mode</label>
+                        <select id="agent-mode" class="styled-select">
+                            <option value="synthesis">Synthesis</option>
+                            <option value="methodology">Methodology Comparison</option>
+                            <option value="gap">Research Gap Analysis</option>
+                            <option value="qa" selected>General Q&amp;A</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="agent-query">Research Query</label>
+                        <textarea id="agent-query" placeholder="What are the main findings across these papers?"></textarea>
+                    </div>
+
+                    <button id="btn-agent-run" class="btn-primary">Run Agent Workflow</button>
+
+                    <!-- Pipeline visualisation -->
+                    <div id="agent-pipeline" class="agent-pipeline">
+                        <div class="pipeline-step" data-agent="router">
+                            <div class="step-dot"></div>
+                            <div class="step-info">
+                                <span class="step-name">Router</span>
+                                <span class="step-status">pending</span>
+                            </div>
+                        </div>
+                        <div class="pipeline-connector"></div>
+                        <div class="pipeline-step" data-agent="retrieval">
+                            <div class="step-dot"></div>
+                            <div class="step-info">
+                                <span class="step-name">Retrieval</span>
+                                <span class="step-status">pending</span>
+                            </div>
+                        </div>
+                        <div class="pipeline-connector"></div>
+                        <div class="pipeline-step" data-agent="synthesis">
+                            <div class="step-dot"></div>
+                            <div class="step-info">
+                                <span class="step-name">Synthesis</span>
+                                <span class="step-status">pending</span>
+                            </div>
+                        </div>
+                        <div class="pipeline-connector"></div>
+                        <div class="pipeline-step" data-agent="critic">
+                            <div class="step-dot"></div>
+                            <div class="step-info">
+                                <span class="step-name">Critic</span>
+                                <span class="step-status">pending</span>
+                            </div>
+                        </div>
+                        <div class="pipeline-connector"></div>
+                        <div class="pipeline-step" data-agent="writer">
+                            <div class="step-dot"></div>
+                            <div class="step-info">
+                                <span class="step-name">Writer</span>
+                                <span class="step-status">pending</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Agent output + critique -->
+                <div class="col right-col glass-panel">
+                    <h2>Agent Output</h2>
+                    <p class="subtitle">Final synthesised response after multi-agent refinement.</p>
+
+                    <div class="loading-state hidden" id="agent-loading">
+                        <div class="spinner"></div>
+                        <span>Running agent pipeline...</span>
+                    </div>
+
+                    <div id="agent-critique-panel" class="agent-critique hidden">
+                        <div class="critique-header">
+                            <span id="critique-confidence-badge" class="confidence-badge">—</span>
+                            <span id="critique-score" class="quality-score">Quality: —/10</span>
+                            <span id="critique-provenance" class="provenance-hash" title="Provenance hash"></span>
+                        </div>
+                        <div id="critique-details" class="critique-details"></div>
+                    </div>
+
+                    <div id="agent-result" class="markdown-body">
+                        <div class="empty-state">Run a query to see the agent-synthesised response.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Provenance View -->
+        <section id="provenance-view" class="view-section hidden">
+            <div class="two-col-layout">
+                <!-- Left: Paper selector + chain status -->
+                <div class="col left-col glass-panel">
+                    <h2>Provenance Ledger</h2>
+                    <p class="subtitle">Tamper-evident hash chain for uploaded papers and generated outputs.</p>
+
+                    <div class="form-group">
+                        <label for="provenance-paper-select">Select Paper</label>
+                        <select id="provenance-paper-select" class="styled-select">
+                            <option value="">-- Upload a paper first --</option>
+                        </select>
+                    </div>
+
+                    <button id="btn-load-provenance" class="btn-primary" disabled>Load Provenance</button>
+
+                    <div id="chain-status" class="chain-status hidden">
+                        <div class="chain-status-indicator" id="chain-indicator"></div>
+                        <div class="chain-status-text">
+                            <strong id="chain-valid-label">—</strong>
+                            <span id="chain-message"></span>
+                        </div>
+                        <div class="chain-meta">
+                            <span id="chain-mode-badge" class="mode-badge">—</span>
+                            <span id="chain-ipfs-badge" class="mode-badge">—</span>
+                            <span id="chain-record-count"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Provenance event timeline -->
+                <div class="col right-col glass-panel">
+                    <h2>Provenance History</h2>
+                    <p class="subtitle">Every upload, summary, and agent output is recorded with an immutable hash.</p>
+
+                    <div class="loading-state hidden" id="provenance-loading">
+                        <div class="spinner"></div>
+                        <span>Loading provenance records...</span>
+                    </div>
+
+                    <div id="provenance-timeline" class="provenance-timeline">
+                        <div class="empty-state">Select a paper to view its provenance chain.</div>
                     </div>
                 </div>
             </div>
