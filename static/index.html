@@ -345,19 +345,20 @@
                 <!-- Left: Paper selector + chain status -->
                 <div class="col left-col glass-panel">
                     <h2>Provenance Ledger</h2>
-                    <p class="subtitle">Tamper-evident hash chain for uploaded papers and generated outputs.</p>
+                    <p class="subtitle">An automatic, tamper-proof record of everything that happens to your research papers.</p>
 
                     <details class="tool-info">
-                        <summary>How this works</summary>
+                        <summary>What is provenance and why does it matter?</summary>
                         <div class="tool-info-body">
-                            <p>Every action in ResearchRadar is automatically recorded with a unique digital fingerprint:</p>
+                            <p><strong>Provenance</strong> simply means <em>proof of origin and history</em> — the same idea as a certificate of authenticity for a piece of art, or a chain of custody for legal evidence.</p>
+                            <p>In research, provenance answers questions like: <em>"Was this paper really uploaded unchanged?", "When exactly did the AI generate this summary?", "Can I prove I had this finding before a competitor published theirs?"</em></p>
+                            <p>ResearchRadar builds this proof automatically by:</p>
                             <ul>
-                                <li>When you upload a paper, a fingerprint (hash) of its content is saved</li>
-                                <li>When the AI generates a summary or answer, that output is also fingerprinted and linked to the previous record</li>
-                                <li>Each new record includes the previous record's hash — creating a chain that cannot be silently altered</li>
-                                <li>If any record is tampered with after the fact, the chain verification will flag it as compromised</li>
-                                <li>Think of it like a bank statement for your research activity — a permanent, tamper-proof audit trail</li>
+                                <li><strong>Fingerprinting every action</strong> — When you upload a paper or the AI generates an output, the system computes a unique "fingerprint" (called a hash) of that content. Even a single changed character produces a completely different fingerprint, making silent tampering detectable.</li>
+                                <li><strong>Chaining records together</strong> — Each new record includes the fingerprint of the previous one, like links in a chain. If any record is altered retroactively, every subsequent link breaks — making the tampering obvious.</li>
+                                <li><strong>Timestamping events</strong> — Every record is stamped with the exact date and time it was created, giving you a verifiable timeline of your research activity.</li>
                             </ul>
+                            <p>Think of it like a bank statement: you cannot silently edit a past transaction without the statement becoming invalid. This ledger works the same way for your research.</p>
                         </div>
                     </details>
 
@@ -377,6 +378,37 @@
                         <button id="btn-download-proof" class="btn-secondary">📜 Download Proof Doc</button>
                     </div>
 
+                    <details class="tool-info" style="margin-top: 1rem;">
+                        <summary>⬇ Export Chain JSON — what does this do?</summary>
+                        <div class="tool-info-body">
+                            <p>Downloads the entire provenance chain for the selected paper as a <strong>JSON file</strong> you can save to your computer.</p>
+                            <p><strong>What's inside:</strong> Every event (upload, AI outputs, timestamps, fingerprints) for that paper, plus a chain validity report.</p>
+                            <p><strong>Why is this useful?</strong></p>
+                            <ul>
+                                <li>You can share this file with a journal editor, grant reviewer, or institutional repository as machine-readable proof that your paper and its analysis were produced on specific dates</li>
+                                <li>A technical collaborator can independently re-run the hash checks without needing to visit this site</li>
+                                <li>You can archive it alongside your paper as part of your reproducibility package — funders like the NIH and UKRI increasingly require this</li>
+                                <li>Audit scripts or CI/CD pipelines can load this file to automatically verify dataset integrity before a publication goes live</li>
+                            </ul>
+                        </div>
+                    </details>
+
+                    <details class="tool-info">
+                        <summary>📜 Download Proof Doc — what does this do?</summary>
+                        <div class="tool-info-body">
+                            <p>Downloads a structured <strong>proof document</strong> — a single JSON file designed to be submitted as evidence of authorship or date-of-discovery.</p>
+                            <p><strong>What's inside:</strong> A clean summary of the paper's title and filename, the exact timestamp of its first upload, the content fingerprint at upload time, any blockchain transaction reference, any IPFS storage reference, and a chain validity verdict.</p>
+                            <p><strong>Why is this useful?</strong></p>
+                            <ul>
+                                <li><strong>Intellectual property disputes</strong> — If two researchers publish similar findings and the question of "who had it first" arises, this document is timestamped proof that your version existed on a specific date</li>
+                                <li><strong>Grant reporting</strong> — Many funders ask for evidence of when data was collected or analysed. This document provides that in a verifiable format</li>
+                                <li><strong>Journal submission</strong> — Some journals accept a provenance document alongside a submission to demonstrate research integrity</li>
+                                <li><strong>Institutional compliance</strong> — Universities with open research or data governance policies can accept this file as part of the audit trail</li>
+                            </ul>
+                            <p>Unlike the full chain export, this document is intentionally concise — one page of key facts — so it can be attached to an email or uploaded to a submission portal without overwhelming the recipient.</p>
+                        </div>
+                    </details>
+
                     <div id="chain-status" class="chain-status hidden">
                         <div class="chain-status-indicator" id="chain-indicator"></div>
                         <div class="chain-status-text">
@@ -394,21 +426,25 @@
                 <!-- Right: Provenance event timeline -->
                 <div class="col right-col glass-panel">
                     <h2>Provenance History</h2>
-                    <p class="subtitle">Every upload, summary, and agent output is recorded with an immutable hash.</p>
+                    <p class="subtitle">A live timeline of every recorded event for your paper — uploads, AI outputs, and agent runs.</p>
 
                     <details class="tool-info">
-                        <summary>Reading the timeline</summary>
+                        <summary>Reading the timeline — what do all these numbers mean?</summary>
                         <div class="tool-info-body">
-                            <p>Each card in the timeline represents one recorded event:</p>
+                            <p>Each card in the timeline represents one recorded event. Here is what the technical terms mean in plain English:</p>
                             <ul>
-                                <li><strong>📄 Upload</strong> — Records when a paper was added and its content fingerprint</li>
-                                <li><strong>📝 Summary</strong> — Records when the AI generated a synthesis or analysis output</li>
-                                <li><strong>🤖 Agent Output</strong> — Records the result of an agent workflow run, including its quality score</li>
-                                <li>The <em>Content Hash</em> is a fingerprint of the actual data; the <em>Record Hash</em> links this record to the previous one in the chain</li>
-                                <li>When a real blockchain is configured, <em>Tx Hash</em> becomes a live link to the block explorer</li>
-                                <li>When IPFS is enabled, <em>IPFS CID</em> becomes a link to the public gateway so anyone can retrieve the file</li>
-                                <li>Click the copy button (⧉) next to any hash to copy it to your clipboard</li>
+                                <li><strong>📄 Upload event</strong> — Created the moment you uploaded a paper. Proves the file existed and was unchanged at that exact time.</li>
+                                <li><strong>📝 Summary event</strong> — Created when the AI generated a synthesis or analysis. Records what the AI produced so the output can never be quietly altered later.</li>
+                                <li><strong>🤖 Agent Output event</strong> — Created after a multi-agent workflow completes. Includes the quality score and confidence level from the Critic agent.</li>
                             </ul>
+                            <p><strong>The four identifiers on each card:</strong></p>
+                            <ul>
+                                <li><strong>Content Hash</strong> — A 64-character code that is a mathematical fingerprint of the actual content (the paper text, or the AI's output). If the content changes even slightly, this code changes completely. You can independently verify it by running <code>sha256sum</code> on the file yourself and comparing.</li>
+                                <li><strong>Record Hash</strong> — A fingerprint that covers both this record <em>and</em> the previous record's hash. This is what creates the unbreakable chain — it's impossible to change an old record without breaking every hash that comes after it.</li>
+                                <li><strong>Tx Hash</strong> (when blockchain is enabled) — A reference number for the Ethereum transaction that anchored this fingerprint on the public blockchain. Clicking the ↗ link opens the transaction on a blockchain explorer like Etherscan, where anyone in the world can independently verify it — no login required, and the record exists even if this website shuts down.</li>
+                                <li><strong>IPFS CID</strong> (when IPFS is enabled) — A permanent address for the content stored on the InterPlanetary File System, a global decentralised storage network. Clicking the ↗ link opens the file via a public gateway. Like the blockchain anchor, this is accessible by anyone and survives independently of this site.</li>
+                            </ul>
+                            <p>Click the <strong>⧉ copy button</strong> next to any hash to copy the full value to your clipboard for use in external tools or reports.</p>
                         </div>
                     </details>
 
@@ -418,15 +454,36 @@
                     </div>
 
                     <div id="provenance-timeline" class="provenance-timeline">
-                        <div class="empty-state">Select a paper to view its provenance chain.</div>
+                        <div class="empty-state">Select a paper and click Load Provenance to view its history.</div>
                     </div>
 
                     <div class="verify-hash-panel">
-                        <h3>Verify a Hash</h3>
-                        <p class="subtitle">Paste a SHA-256 content hash to check if it exists in the provenance chain — usable by any external system.</p>
+                        <h3>🔍 Verify a Hash</h3>
+                        <p class="subtitle">Check whether a specific content fingerprint exists in the provenance chain — without needing to load the full timeline.</p>
+
+                        <details class="tool-info">
+                            <summary>What is this for and how do I use it?</summary>
+                            <div class="tool-info-body">
+                                <p><strong>What it does:</strong> You paste a SHA-256 hash (a 64-character string of letters and numbers) and the system searches every provenance record to find a match. If found, it tells you which paper it belongs to, what type of event it was, and when it was recorded.</p>
+                                <p><strong>Where does a hash come from?</strong></p>
+                                <ul>
+                                    <li>Copy a <em>Content Hash</em> from any provenance card above and paste it here to confirm it is genuine</li>
+                                    <li>Run <code>sha256sum yourpaper.pdf</code> in a terminal on your own computer and paste the result — if it matches a record here, you have independent proof that the file was registered unchanged</li>
+                                    <li>A journal editor, reviewer, or collaborator can use this tool to verify a hash you sent them without needing an account or log-in</li>
+                                </ul>
+                                <p><strong>Practical examples:</strong></p>
+                                <ul>
+                                    <li>A co-author questions whether the version of the paper they received is the same as what was uploaded — paste the hash of their copy here to check</li>
+                                    <li>A reviewer wants to confirm that the AI-generated analysis they are reading was produced at the time you claim — paste the content hash from your proof document</li>
+                                    <li>An automated pipeline (e.g. a GitHub Action or a submission portal) can call the <code>/api/provenance/verify-hash</code> API endpoint directly to validate integrity as part of a workflow</li>
+                                </ul>
+                                <p>The result will tell you: ✓ <em>found</em> (with details), or ✗ <em>not found</em> (meaning the content was never registered, or was registered in a different session).</p>
+                            </div>
+                        </details>
+
                         <div class="form-group">
-                            <label for="verify-hash-input">Content Hash (SHA-256 hex)</label>
-                            <input type="text" id="verify-hash-input" class="styled-input" placeholder="e.g. a1b2c3d4e5f6…" spellcheck="false" autocomplete="off">
+                            <label for="verify-hash-input">Content Hash (SHA-256 hex, 64 characters)</label>
+                            <input type="text" id="verify-hash-input" class="styled-input" placeholder="e.g. a1b2c3d4e5f6… (paste a 64-character hash here)" spellcheck="false" autocomplete="off">
                         </div>
                         <div class="verify-hash-row">
                             <button id="btn-verify-hash" class="btn-secondary">🔍 Verify Hash</button>
