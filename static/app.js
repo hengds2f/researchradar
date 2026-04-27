@@ -704,22 +704,57 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="prov-hash-row">
                             <span class="prov-hash-label">Content Hash</span>
                             <code class="prov-hash" title="${rec.content_hash}">${shortHash}</code>
+                            <button class="prov-copy-btn" data-copy="${escapeHtml(rec.content_hash)}" title="Copy full hash">⧉</button>
                         </div>
                         <div class="prov-hash-row">
                             <span class="prov-hash-label">Record Hash</span>
                             <code class="prov-hash" title="${rec.record_hash}">${shortRecord}</code>
+                            <button class="prov-copy-btn" data-copy="${escapeHtml(rec.record_hash)}" title="Copy full hash">⧉</button>
                         </div>
                         ${txHash ? `<div class="prov-hash-row">
                             <span class="prov-hash-label">Tx Hash</span>
                             <code class="prov-hash prov-tx" title="${rec.tx_hash}">${txHash}</code>
+                            <button class="prov-copy-btn" data-copy="${escapeHtml(rec.tx_hash)}" title="Copy full hash">⧉</button>
                         </div>` : ''}
                         ${ipfsCid ? `<div class="prov-hash-row">
                             <span class="prov-hash-label">IPFS CID</span>
                             <code class="prov-hash prov-ipfs" title="${ipfsCid}">${ipfsCid.substring(0, 20)}…</code>
+                            <button class="prov-copy-btn" data-copy="${escapeHtml(ipfsCid)}" title="Copy full CID">⧉</button>
                         </div>` : ''}
                         ${metaHtml ? `<div class="prov-meta">${metaHtml}</div>` : ''}
                     </div>
                 `;
+
+                // Attach copy handlers for this card
+                card.querySelectorAll('.prov-copy-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const text = btn.dataset.copy;
+                        navigator.clipboard.writeText(text).then(() => {
+                            btn.textContent = '✓';
+                            btn.classList.add('prov-copy-btn--copied');
+                            setTimeout(() => {
+                                btn.textContent = '⧉';
+                                btn.classList.remove('prov-copy-btn--copied');
+                            }, 1500);
+                        }).catch(() => {
+                            // Fallback for browsers without clipboard API
+                            const ta = document.createElement('textarea');
+                            ta.value = text;
+                            ta.style.position = 'fixed';
+                            ta.style.opacity = '0';
+                            document.body.appendChild(ta);
+                            ta.select();
+                            document.execCommand('copy');
+                            document.body.removeChild(ta);
+                            btn.textContent = '✓';
+                            btn.classList.add('prov-copy-btn--copied');
+                            setTimeout(() => {
+                                btn.textContent = '⧉';
+                                btn.classList.remove('prov-copy-btn--copied');
+                            }, 1500);
+                        });
+                    });
+                });
                 provenanceTimeline.appendChild(card);
             });
 
