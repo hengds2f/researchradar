@@ -23,6 +23,7 @@
         <nav>
             <button id="nav-synthesis" class="active">Synthesis</button>
             <button id="nav-cluster">Clustering Map</button>
+            <button id="nav-analysis">Paper Analysis</button>
         </nav>
     </header>
 
@@ -91,6 +92,55 @@
                 <h2>Semantic Clustering Map</h2>
                 <p class="subtitle">Visualizing topic groupings across the uploaded corpus based on vector embeddings.</p>
                 <div id="d3-container" class="d3-canvas"></div>
+            </div>
+        </section>
+
+        <!-- Paper Analysis View -->
+        <section id="analysis-view" class="view-section hidden">
+            <div class="two-col-layout">
+                <!-- Left: Paper selector + section classification table -->
+                <div class="col left-col glass-panel">
+                    <h2>Section Classifier</h2>
+                    <p class="subtitle">SciBERT-style zero-shot classification assigns scientific section labels with confidence scores.</p>
+
+                    <div class="form-group">
+                        <label for="analysis-paper-select">Select Paper</label>
+                        <select id="analysis-paper-select" class="styled-select">
+                            <option value="">-- Upload a paper first --</option>
+                        </select>
+                    </div>
+
+                    <button id="btn-run-analysis" class="btn-primary" disabled>Run ML Analysis</button>
+
+                    <div class="loading-state hidden" id="analysis-loading">
+                        <div class="spinner"></div>
+                        <span>Running ML analysis...</span>
+                    </div>
+
+                    <div id="sections-table" class="sections-table"></div>
+                </div>
+
+                <!-- Right: D3 section distribution chart + limitations + summaries -->
+                <div class="col right-col glass-panel">
+                    <h2>Analysis Results</h2>
+                    <p class="subtitle">Section distribution, detected limitations, and abstractive section summaries.</p>
+
+                    <div id="section-chart-container" class="chart-container">
+                        <h3>Section Distribution</h3>
+                        <div id="section-chart" class="d3-canvas chart-medium"></div>
+                        <div id="chart-empty" class="empty-state">Run ML analysis on a paper to see its section distribution.</div>
+                    </div>
+
+                    <div id="limitations-panel" class="analysis-subpanel hidden">
+                        <h3>Detected Limitations</h3>
+                        <ul id="limitations-list" class="limitations-list"></ul>
+                    </div>
+
+                    <div id="summaries-panel" class="analysis-subpanel hidden">
+                        <h3>Section Summaries</h3>
+                        <div id="summaries-content" class="summaries-content"></div>
+                    </div>
+                </div>
             </div>
         </section>
 

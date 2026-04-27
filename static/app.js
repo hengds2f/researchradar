@@ -2,22 +2,28 @@ document.addEventListener('DOMContentLoaded', () => {
     // Nav logic
     const navSynthesis = document.getElementById('nav-synthesis');
     const navCluster = document.getElementById('nav-cluster');
+    const navAnalysis = document.getElementById('nav-analysis');
     const viewSynthesis = document.getElementById('synthesis-view');
     const viewCluster = document.getElementById('cluster-view');
+    const viewAnalysis = document.getElementById('analysis-view');
 
-    navSynthesis.addEventListener('click', () => {
-        navSynthesis.classList.add('active');
-        navCluster.classList.remove('active');
-        viewSynthesis.classList.remove('hidden');
-        viewCluster.classList.add('hidden');
-    });
+    function activateView(activeNav, activeView) {
+        [navSynthesis, navCluster, navAnalysis].forEach(b => b.classList.remove('active'));
+        [viewSynthesis, viewCluster, viewAnalysis].forEach(v => v.classList.add('hidden'));
+        activeNav.classList.add('active');
+        activeView.classList.remove('hidden');
+    }
+
+    navSynthesis.addEventListener('click', () => activateView(navSynthesis, viewSynthesis));
 
     navCluster.addEventListener('click', () => {
-        navCluster.classList.add('active');
-        navSynthesis.classList.remove('active');
-        viewCluster.classList.remove('hidden');
-        viewSynthesis.classList.add('hidden');
+        activateView(navCluster, viewCluster);
         renderD3Clustering();
+    });
+
+    navAnalysis.addEventListener('click', () => {
+        activateView(navAnalysis, viewAnalysis);
+        refreshPaperSelector();
     });
 
     // Upload logic
@@ -252,5 +258,219 @@ document.addEventListener('DOMContentLoaded', () => {
             container.innerHTML = '<div style="padding: 2rem; color: #94a3b8;">Failed to load cluster map.</div>';
             console.error(e);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Paper Analysis View
+    // -----------------------------------------------------------------------
+
+    const analysisPaperSelect = document.getElementById('analysis-paper-select');
+    const btnRunAnalysis = document.getElementById('btn-run-analysis');
+    const analysisLoading = document.getElementById('analysis-loading');
+    const sectionsTable = document.getElementById('sections-table');
+    const limitationsPanel = document.getElementById('limitations-panel');
+    const limitationsList = document.getElementById('limitations-list');
+    const summariesPanel = document.getElementById('summaries-panel');
+    const summariesContent = document.getElementById('summaries-content');
+    const chartEmpty = document.getElementById('chart-empty');
+
+    // Populate the paper dropdown from /api/papers
+    async function refreshPaperSelector() {
+        try {
+            const res = await fetch('/api/papers');
+            const data = await res.json();
+            const papers = data.papers || [];
+
+            analysisPaperSelect.innerHTML = papers.length
+                ? '<option value="">-- Select a paper --</option>'
+                : '<option value="">-- Upload a paper first --</option>';
+
+            papers.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                opt.textContent = p.title;
+                analysisPaperSelect.appendChild(opt);
+            });
+        } catch (e) {
+            console.error('Failed to fetch papers list', e);
+        }
+    }
+
+    analysisPaperSelect.addEventListener('change', () => {
+        btnRunAnalysis.disabled = !analysisPaperSelect.value;
+    });
+
+    btnRunAnalysis.addEventListener('click', async () => {
+        const paperId = analysisPaperSelect.value;
+        if (!paperId) return;
+
+        // Reset UI
+        sectionsTable.innerHTML = '';
+        limitationsPanel.classList.add('hidden');
+        summariesPanel.classList.add('hidden');
+        chartEmpty.style.display = 'block';
+        document.getElementById('section-chart').innerHTML = '';
+        analysisLoading.classList.remove('hidden');
+        btnRunAnalysis.disabled = true;
+
+        try {
+            const res = await fetch(`/api/paper/${paperId}/ml-analysis`, { method: 'POST' });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || 'ML analysis failed');
+            }
+            const data = await res.json();
+
+            analysisLoading.classList.add('hidden');
+
+            // Render section classification table
+            renderSectionsTable(data.classified_sections || []);
+
+            // Render D3 bar chart for section distribution
+            if (data.section_distribution && Object.keys(data.section_distribution).length) {
+                chartEmpty.style.display = 'none';
+                renderSectionDistributionChart(data.section_distribution);
+            }
+
+            // Render limitations
+            if (data.limitations && data.limitations.length) {
+                limitationsList.innerHTML = '';
+                data.limitations.forEach(lim => {
+                    const li = document.createElement('li');
+                    li.className = 'limitation-item';
+                    const badge = lim.source === 'llm' ? '<span class="badge badge-llm">LLM</span>' : '<span class="badge badge-pattern">Pattern</span>';
+                    li.innerHTML = `${badge}<span>${escapeHtml(lim.text)}</span>`;
+                    limitationsList.appendChild(li);
+                });
+                limitationsPanel.classList.remove('hidden');
+            }
+
+            // Render section summaries
+            const summaries = data.section_summaries || {};
+            if (Object.keys(summaries).length) {
+                summariesContent.innerHTML = '';
+                Object.entries(summaries).forEach(([sectionType, summary]) => {
+                    if (!summary) return;
+                    const div = document.createElement('div');
+                    div.className = 'summary-block';
+                    div.innerHTML = `<strong class="summary-label">${capitalise(sectionType)}</strong><p>${escapeHtml(summary)}</p>`;
+                    summariesContent.appendChild(div);
+                });
+                summariesPanel.classList.remove('hidden');
+            }
+
+        } catch (err) {
+            analysisLoading.classList.add('hidden');
+            sectionsTable.innerHTML = `<div class="empty-state" style="color:#f87171;">Error: ${escapeHtml(String(err).substring(0, 300))}</div>`;
+        } finally {
+            btnRunAnalysis.disabled = false;
+        }
+    });
+
+    function renderSectionsTable(sections) {
+        if (!sections.length) {
+            sectionsTable.innerHTML = '<div class="empty-state">No sections found.</div>';
+            return;
+        }
+
+        const rows = sections.map(s => {
+            const conf = s.ml_confidence != null ? (s.ml_confidence * 100).toFixed(1) : '—';
+            const confWidth = s.ml_confidence ? Math.round(s.ml_confidence * 100) : 0;
+            const mlLabel = s.ml_label || '—';
+            const rawLabel = s.section_type || '—';
+
+            return `
+            <div class="section-row">
+                <div class="section-meta">
+                    <span class="tag tag-raw">${escapeHtml(rawLabel)}</span>
+                    <span class="tag tag-ml">${escapeHtml(mlLabel)}</span>
+                </div>
+                <div class="confidence-bar-wrap">
+                    <div class="confidence-bar" style="width:${confWidth}%"></div>
+                    <span class="confidence-label">${conf}%</span>
+                </div>
+                <p class="section-preview">${escapeHtml((s.content_preview || '').substring(0, 120))}…</p>
+            </div>`;
+        }).join('');
+
+        sectionsTable.innerHTML = `<div class="sections-list">${rows}</div>`;
+    }
+
+    function renderSectionDistributionChart(distribution) {
+        const container = document.getElementById('section-chart');
+        container.innerHTML = '';
+
+        const entries = Object.entries(distribution).sort((a, b) => b[1] - a[1]);
+        const margin = { top: 10, right: 20, bottom: 30, left: 110 };
+        const width = (container.clientWidth || 360) - margin.left - margin.right;
+        const height = Math.max(entries.length * 36, 120) - margin.top - margin.bottom;
+
+        const color = d3.scaleOrdinal()
+            .domain(entries.map(d => d[0]))
+            .range(['#3b82f6', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899']);
+
+        const svg = d3.select('#section-chart')
+            .append('svg')
+            .attr('width', width + margin.left + margin.right)
+            .attr('height', height + margin.top + margin.bottom)
+            .append('g')
+            .attr('transform', `translate(${margin.left},${margin.top})`);
+
+        const x = d3.scaleLinear()
+            .domain([0, d3.max(entries, d => d[1]) + 1])
+            .range([0, width]);
+
+        const y = d3.scaleBand()
+            .domain(entries.map(d => d[0]))
+            .range([0, height])
+            .padding(0.25);
+
+        // Bars
+        svg.selectAll('.bar')
+            .data(entries)
+            .enter()
+            .append('rect')
+            .attr('class', 'bar')
+            .attr('x', 0)
+            .attr('y', d => y(d[0]))
+            .attr('width', d => x(d[1]))
+            .attr('height', y.bandwidth())
+            .attr('fill', d => color(d[0]))
+            .attr('rx', 4);
+
+        // Value labels
+        svg.selectAll('.bar-label')
+            .data(entries)
+            .enter()
+            .append('text')
+            .attr('class', 'bar-label')
+            .attr('x', d => x(d[1]) + 6)
+            .attr('y', d => y(d[0]) + y.bandwidth() / 2)
+            .attr('dy', '0.35em')
+            .attr('fill', '#94a3b8')
+            .attr('font-size', '12px')
+            .text(d => d[1]);
+
+        // Y axis
+        svg.append('g')
+            .call(d3.axisLeft(y).tickSize(0))
+            .selectAll('text')
+            .attr('fill', '#cbd5e1')
+            .attr('font-size', '12px');
+
+        svg.select('.domain').remove();
+    }
+
+    // Utility helpers
+    function escapeHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function capitalise(str) {
+        return str.charAt(0).toUpperCase() + str.slice(1);
     }
 });

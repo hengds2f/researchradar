@@ -9,6 +9,9 @@ import re
 import chromadb
 from huggingface_hub import InferenceClient
 
+# ML analysis service
+from services.paper_ml import PaperMLService
+
 app = Flask(__name__, static_folder='static')
 
 # Environment configuration
@@ -20,6 +23,9 @@ if not HF_TOKEN:
 # Initialize ChromaDB (Local In-Memory Vector Database)
 chroma_client = chromadb.Client()
 collection = chroma_client.get_or_create_collection(name="research_papers")
+
+# Initialize ML analysis service (lazy – no local weights loaded)
+ml_service = PaperMLService(HF_TOKEN)
 
 papers = {}
 
@@ -112,7 +118,8 @@ def upload_pdf():
                 'id': paper_id,
                 'title': filename.replace('.pdf', ''),
                 'filename': filename,
-                'chunk_types': chunk_types
+                'chunk_types': chunk_types,
+                'sections': sections,   # stored for ML analysis
             }
             uploaded_papers.append(papers[paper_id])
             
@@ -269,6 +276,102 @@ def clustering_data():
     except Exception as e:
         print(f"Clustering matrix error: {e}")
         return jsonify({"nodes": [], "links": []})
+
+
+# ---------------------------------------------------------------------------
+# ML analysis routes
+# ---------------------------------------------------------------------------
+
+@app.route('/api/papers', methods=['GET'])
+def list_papers():
+    """Return metadata for all uploaded papers (id, title, chunk_types)."""
+    safe = [
+        {k: v for k, v in p.items() if k != 'sections'}
+        for p in papers.values()
+    ]
+    return jsonify({'papers': safe})
+
+
+@app.route('/api/paper/<paper_id>/ml-analysis', methods=['POST'])
+def paper_ml_analysis(paper_id):
+    """Run full ML analysis (section classification + limitations + summaries).
+
+    Results are cached on the paper dict so repeated calls are instant.
+    """
+    if paper_id not in papers:
+        return jsonify({'error': 'Paper not found'}), 404
+
+    paper = papers[paper_id]
+
+    # Return cached result if already computed
+    if 'ml_analysis' in paper:
+        return jsonify(paper['ml_analysis'])
+
+    sections = paper.get('sections', [])
+    if not sections:
+        return jsonify({'error': 'No sections available for this paper'}), 400
+
+    try:
+        result = ml_service.analyze_paper(paper_id, sections)
+        papers[paper_id]['ml_analysis'] = result
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({'error': f'ML analysis failed: {str(exc)}'}), 500
+
+
+@app.route('/api/paper/<paper_id>/limitations', methods=['GET'])
+def paper_limitations(paper_id):
+    """Return extracted limitation sentences for a paper.
+
+    Uses cached ML analysis when available; otherwise runs pattern detection.
+    """
+    if paper_id not in papers:
+        return jsonify({'error': 'Paper not found'}), 404
+
+    cached = papers[paper_id].get('ml_analysis')
+    if cached and 'limitations' in cached:
+        return jsonify({'paper_id': paper_id, 'limitations': cached['limitations']})
+
+    sections = papers[paper_id].get('sections', [])
+    if not sections:
+        return jsonify({'paper_id': paper_id, 'limitations': []})
+
+    limitations = ml_service.detect_limitations(sections)
+    return jsonify({'paper_id': paper_id, 'limitations': limitations})
+
+
+@app.route('/api/paper/<paper_id>/sections', methods=['GET'])
+def paper_sections(paper_id):
+    """Return section chunks enriched with ML labels when analysis has run."""
+    if paper_id not in papers:
+        return jsonify({'error': 'Paper not found'}), 404
+
+    paper = papers[paper_id]
+    ml_analysis = paper.get('ml_analysis')
+
+    if ml_analysis:
+        return jsonify({
+            'paper_id': paper_id,
+            'sections': ml_analysis.get('classified_sections', []),
+            'section_distribution': ml_analysis.get('section_distribution', {}),
+        })
+
+    # Fallback: raw sections without ML labels
+    sections = paper.get('sections', [])
+    dist: dict = {}
+    for s in sections:
+        st = s.get('section_type', 'unknown')
+        dist[st] = dist.get(st, 0) + 1
+
+    return jsonify({
+        'paper_id': paper_id,
+        'sections': [
+            {'section_type': s['section_type'], 'content_preview': s['content'][:200]}
+            for s in sections
+        ],
+        'section_distribution': dist,
+    })
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=7860)
