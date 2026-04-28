@@ -362,6 +362,46 @@ def list_papers():
     return jsonify({'papers': safe})
 
 
+@app.route('/api/paper/<paper_id>', methods=['DELETE'])
+def delete_paper(paper_id):
+    """Delete a single paper and all its ChromaDB chunks for this session."""
+    session_id, err = _session_required()
+    if err:
+        return err
+    if paper_id not in papers or papers[paper_id].get('session_id') != session_id:
+        return jsonify({'error': 'Paper not found'}), 404
+
+    # Remove all ChromaDB chunks belonging to this paper
+    try:
+        collection.delete(where={'paper_id': {'$eq': paper_id}})
+    except Exception as exc:
+        logger.warning("ChromaDB delete failed for paper %s: %s", paper_id, exc)
+
+    del papers[paper_id]
+    return jsonify({'deleted': paper_id})
+
+
+@app.route('/api/session', methods=['DELETE'])
+def clear_session():
+    """Delete ALL papers and ChromaDB chunks for the current session."""
+    session_id, err = _session_required()
+    if err:
+        return err
+
+    session_paper_ids = [
+        pid for pid, p in papers.items() if p.get('session_id') == session_id
+    ]
+
+    for pid in session_paper_ids:
+        try:
+            collection.delete(where={'paper_id': {'$eq': pid}})
+        except Exception as exc:
+            logger.warning("ChromaDB delete failed for paper %s: %s", pid, exc)
+        del papers[pid]
+
+    return jsonify({'cleared': len(session_paper_ids)})
+
+
 @app.route('/api/paper/<paper_id>/ml-analysis', methods=['POST'])
 def paper_ml_analysis(paper_id):
     """Run full ML analysis (section classification + limitations + summaries).

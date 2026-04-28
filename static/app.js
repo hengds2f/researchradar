@@ -200,24 +200,83 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     let allPapers = [];
-    function updatePaperList(papers) {
-        allPapers = [...allPapers, ...papers];
-        paperList.innerHTML = '';
-        const uniquePapers = [...new Map(allPapers.map(item => [item['title'], item])).values()];
-        allPapers = uniquePapers;
 
+    function renderPaperList() {
+        paperList.innerHTML = '';
         if (allPapers.length === 0) {
             paperList.innerHTML = '<li class="empty-state">No papers uploaded yet.</li>';
             return;
         }
-
         allPapers.forEach(p => {
             const li = document.createElement('li');
+            li.dataset.paperId = p.id;
             const chunkStr = p.chunk_types ? p.chunk_types.join(', ') : 'abstract, methods, results, discussion';
-            li.innerHTML = `<div><strong>${p.title}</strong><br><span style="font-size: 0.75rem; color: #94a3b8;">Extracted Sections: ${chunkStr}</span></div>`;
+            li.innerHTML = `
+                <div class="paper-list-info">
+                    <strong>${escapeHtml(p.title)}</strong><br>
+                    <span style="font-size:0.75rem;color:#94a3b8;">Sections: ${escapeHtml(chunkStr)}</span>
+                </div>
+                <button class="btn-delete-paper" data-id="${p.id}" title="Delete this paper">✕</button>`;
+            li.querySelector('.btn-delete-paper').addEventListener('click', () => deletePaper(p.id));
             paperList.appendChild(li);
         });
     }
+
+    function updatePaperList(newPapers) {
+        newPapers.forEach(p => {
+            if (!allPapers.find(x => x.id === p.id)) allPapers.push(p);
+        });
+        renderPaperList();
+    }
+
+    async function deletePaper(paperId) {
+        const uploadLog = new ActivityLog('upload-log');
+        try {
+            const res = await fetch(`/api/paper/${encodeURIComponent(paperId)}`, {
+                method: 'DELETE',
+                headers: sessionHeaders(),
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || `HTTP ${res.status}`);
+            }
+            allPapers = allPapers.filter(p => p.id !== paperId);
+            renderPaperList();
+            uploadLog.add('Paper removed from your knowledge base.', 'success');
+        } catch (err) {
+            uploadLog.add('Failed to delete paper: ' + String(err).substring(0, 100), 'error');
+        }
+    }
+
+    // New Session button
+    const btnNewSession = document.getElementById('btn-new-session');
+    btnNewSession.addEventListener('click', async () => {
+        if (allPapers.length === 0) return;
+        if (!confirm('Clear all uploaded papers and start a new session?')) return;
+        const uploadLog = new ActivityLog('upload-log');
+        try {
+            const res = await fetch('/api/session', {
+                method: 'DELETE',
+                headers: sessionHeaders(),
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || `HTTP ${res.status}`);
+            }
+            // Generate a fresh session ID
+            sessionId = crypto.randomUUID();
+            sessionStorage.setItem('researchSessionId', sessionId);
+            allPapers = [];
+            renderPaperList();
+            uploadLog.add('Session cleared — all papers removed. You can now upload new papers.', 'success');
+            // Reset result area
+            resultContent.innerHTML = '<div class="empty-state">Query results will appear here.</div>';
+            resultContent.classList.remove('hidden');
+            loadingSpinner.classList.add('hidden');
+        } catch (err) {
+            uploadLog.add('Failed to clear session: ' + String(err).substring(0, 100), 'error');
+        }
+    });
 
     // Query Logic
     const btnSubmit = document.getElementById('btn-submit');
