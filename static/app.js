@@ -189,6 +189,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 uploadLog.add(`Paper${count > 1 ? 's' : ''} added successfully — ${count} paper${count > 1 ? 's' : ''} now in your knowledge base`, 'success');
                 updatePaperList(data.papers);
                 clusterMap.reset();
+                // Auto-refresh the map if the user is currently viewing it
+                if (!viewCluster.classList.contains('hidden')) {
+                    clusterMap.render();
+                }
                 dropZone.querySelector('p').textContent = 'Drag & drop more PDFs here, or click to browse';
             }
         })
@@ -398,6 +402,7 @@ document.addEventListener('DOMContentLoaded', () => {
             this._detailHighlightBtn = document.getElementById('detail-highlight-cluster');
             this._detailClearBtn = document.getElementById('detail-clear-highlight');
             this._detailClose = document.getElementById('detail-close');
+            this._refreshBtn = document.getElementById('cluster-refresh-btn');
 
             this._setupEventListeners();
         }
@@ -422,6 +427,7 @@ document.addEventListener('DOMContentLoaded', () => {
             this._togglesEl.classList.add('hidden');
             this._methodBadge.classList.add('hidden');
             this._detailPanel.classList.add('hidden');
+            this._refreshBtn.classList.add('hidden');
         }
 
         async render() {
@@ -471,6 +477,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (this._selectedClusterId !== null) this._applyHighlight(this._selectedClusterId);
             });
             this._detailClearBtn.addEventListener('click', () => this._clearHighlight());
+            this._refreshBtn.addEventListener('click', () => {
+                this.reset();
+                this.render();
+            });
         }
 
         // ── Fetch + render ────────────────────────────────────────────────────
@@ -522,6 +532,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 this._filtersEl.classList.remove('hidden');
                 this._togglesEl.classList.remove('hidden');
                 this._methodBadge.classList.remove('hidden');
+                this._refreshBtn.classList.remove('hidden');
 
             } catch (err) {
                 cancelSimulation(simIds);

@@ -293,6 +293,52 @@ def query_papers():
     
     return jsonify({'response': response_text, 'chunks': retrieved})
 
+
+def _build_tfidf_embeddings(paper_ids: list[str]) -> dict[str, np.ndarray]:
+    """Build TF-IDF + TruncatedSVD embeddings from paper section text.
+
+    Used as a fallback when ChromaDB embeddings are unavailable (e.g.
+    sentence-transformers not installed in the runtime environment).
+    """
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.decomposition import TruncatedSVD
+
+        texts: list[str] = []
+        valid_ids: list[str] = []
+        for pid in paper_ids:
+            sections = papers.get(pid, {}).get('sections', [])
+            text = ' '.join(s.get('content', '') for s in sections)
+            if text.strip():
+                texts.append(text)
+                valid_ids.append(pid)
+
+        if len(valid_ids) < 2:
+            return {}
+
+        vectorizer = TfidfVectorizer(
+            max_features=5000, stop_words='english', min_df=1, max_df=0.95,
+            sublinear_tf=True,
+        )
+        X = vectorizer.fit_transform(texts)
+
+        n_components = min(128, X.shape[1] - 1, len(valid_ids) - 1)
+        if n_components < 2:
+            # Corpus too small for SVD — use normalised raw TF-IDF
+            X_dense = X.toarray()
+            norms = np.linalg.norm(X_dense, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            return {pid: X_dense[i] / norms[i] for i, pid in enumerate(valid_ids)}
+
+        svd = TruncatedSVD(n_components=n_components, random_state=42)
+        X_reduced = svd.fit_transform(X).astype(np.float32)
+        return {pid: X_reduced[i] for i, pid in enumerate(valid_ids)}
+
+    except Exception as exc:
+        logger.warning("TF-IDF fallback failed: %s", exc)
+        return {}
+
+
 @app.route('/api/clustering', methods=['GET'])
 def clustering_data():
     """Return a 2-D semantic map for all papers in this session.
@@ -327,7 +373,7 @@ def clustering_data():
                 "method": {"reduction": "none", "clustering": "none"},
             })
 
-        # --- Fetch chunk embeddings from ChromaDB, average per paper ---
+        # --- Attempt 1: ChromaDB vector embeddings (preferred) ---
         paper_embeddings: dict[str, np.ndarray] = {}
         for pid in session_paper_ids:
             chunk_ids = papers[pid].get('chunk_ids', [])
@@ -336,14 +382,26 @@ def clustering_data():
             try:
                 result = collection.get(ids=chunk_ids, include=['embeddings'])
                 embs = result.get('embeddings') or []
-                valid = [np.array(e) for e in embs if e is not None]
+                valid = [
+                    np.array(e) for e in embs
+                    if e is not None and len(e) > 0
+                ]
                 if valid:
                     paper_embeddings[pid] = np.mean(valid, axis=0)
             except Exception as inner_exc:
                 logger.warning(
-                    "Clustering: failed to fetch embeddings for paper %s: %s",
+                    "Clustering: ChromaDB embeddings failed for paper %s: %s",
                     pid, inner_exc,
                 )
+
+        # --- Attempt 2: TF-IDF fallback when ChromaDB embeddings are absent ---
+        if len(paper_embeddings) < 2:
+            logger.info(
+                "Clustering: ChromaDB returned embeddings for only %d/%d papers; "
+                "falling back to TF-IDF",
+                len(paper_embeddings), len(session_paper_ids),
+            )
+            paper_embeddings = _build_tfidf_embeddings(session_paper_ids)
 
         if len(paper_embeddings) < 2:
             return jsonify({
