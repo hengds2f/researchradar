@@ -24,7 +24,7 @@ ResearchRadar is an AI-powered Academic Paper Discovery and Synthesis Assistant.
 | **Section Classifier** | Each paragraph is labelled with its scientific section type and a confidence score. |
 | **Agent Workflow** | A five-step AI pipeline (Router → Retrieval → Synthesis → Critic → Writer) refines every answer before it reaches you. |
 | **Provenance Ledger** | Every upload and AI output is stamped with a tamper-evident SHA-256 hash chain so you can verify nothing was changed. |
-| **Clustering Map** | Papers are plotted on an interactive D3.js graph based on semantic similarity. |
+| **Clustering Map** | Papers are projected into 2-D using UMAP (or PCA fallback) and grouped with HDBSCAN (or KMeans fallback), then rendered as an interactive Plotly scatter map. Hover, click, filter, and highlight clusters. Falls back to TF-IDF vectors when sentence-transformer embeddings are unavailable. |
 
 ---
 
@@ -40,6 +40,8 @@ Flask Web Server  (app.py)
     ├── ChromaDB (vector database)  ←── stores paragraph embeddings for fast search
     │
     ├── PaperMLService              ←── classifies sections, detects limitations, summarises
+    │
+    ├── ClusteringService           ←── UMAP/PCA + HDBSCAN/KMeans, SHA-256 content cache
     │
     ├── AgentOrchestrator           ←── 5-agent AI pipeline
     │       Router → Retrieval → Synthesis → Critic → Writer
@@ -62,6 +64,7 @@ ResearchRadar/
 │
 ├── services/               # Back-end business logic
 │   ├── paper_ml.py         # Section classification & summarisation
+│   ├── clustering_service.py  # 2-D semantic map: UMAP/PCA + HDBSCAN/KMeans + cache
 │   ├── research_agents.py  # Individual AI agent implementations
 │   ├── agent_orchestrator.py  # Runs the 5-agent pipeline
 │   ├── provenance_service.py  # Hash-chain provenance tracking
@@ -150,7 +153,7 @@ To set your `HF_TOKEN` so the AI works inside the Space:
 | `POST` | `/api/upload` | Upload one or more PDFs / text files |
 | `POST` | `/api/query` | Ask a question across all uploaded papers |
 | `GET` | `/api/papers` | List all uploaded papers |
-| `GET` | `/api/clustering` | Get similarity data for the cluster map |
+| `GET` | `/api/clustering` | Compute and return the 2-D semantic map (points, clusters, stats, method) |
 | `POST` | `/api/paper/<id>/ml-analysis` | Run section classification on one paper |
 | `POST` | `/api/research/agent-run` | Run the full 5-agent workflow |
 | `GET` | `/api/research/<id>/agent-state` | Get the last agent run result for a paper |
@@ -165,7 +168,8 @@ To set your `HF_TOKEN` so the AI works inside the Space:
 | Web framework | Python / Flask 3 |
 | Vector database | ChromaDB (in-memory) |
 | AI models | Meta-Llama-3-8B-Instruct, facebook/bart-large-mnli (via HF Inference API) |
-| Frontend | HTML5, Vanilla JS, D3.js v7, marked.js |
+| Clustering | scikit-learn (TF-IDF / KMeans / TruncatedSVD), umap-learn (UMAP), hdbscan (HDBSCAN) |
+| Frontend | HTML5, Vanilla JS, Plotly.js 2.32, D3.js v7, marked.js |
 | Provenance | SHA-256 linked hash chain |
 | Optional IPFS | Pinata API |
 | Optional blockchain | Web3.py + Solidity (^0.8.19) |

@@ -23,13 +23,14 @@ The app is a **single-page application (SPA)**: there is only one HTML file. Dif
 | Tab / Section ID | What the user sees |
 |---|---|
 | `#synthesis-view` | Upload zone on the left, AI query panel on the right. The default landing view. |
-| `#cluster-view` | An interactive D3.js force-directed graph showing papers grouped by semantic similarity. |
-| `#analysis-view` | Section classification table, confidence bars, a horizontal bar chart, detected limitations, and section summaries for one paper at a time. |
+| `#cluster-view` | An interactive Plotly.js scatter map showing papers projected into 2-D with UMAP/PCA and grouped by HDBSCAN/KMeans. Includes a sidebar with stats, filters, display toggles, and a paper detail panel. |
+| `#analysis-view` | Section classification table, confidence bars, a horizontal D3 bar chart, detected limitations, and section summaries for one paper at a time. |
 | `#agents-view` | Agent Workflow — a query form on the left and a live pipeline visualiser with five step-dots (Router → Retrieval → Synthesis → Critic → Writer). The right panel shows the critique badge, quality score, and final response. |
 | `#provenance-view` | Provenance Ledger — select a paper to see its full hash-chain history as a vertical timeline of cards. |
 
 ### External libraries loaded
-- **D3.js v7** (`https://d3js.org/d3.v7.min.js`) — used for the clustering force graph and the section distribution bar chart.
+- **Plotly.js 2.32** (`https://cdn.plot.ly/plotly-2.32.0.min.js`) — renders the interactive clustering scatter map with built-in zoom, pan, lasso select, hover tooltips, and click events.
+- **D3.js v7** (`https://d3js.org/d3.v7.min.js`) — used for the section distribution bar chart in the Paper Analysis tab.
 - **marked.js** (`https://cdn.jsdelivr.net/npm/marked/marked.min.js`) — converts Markdown text returned by the AI into formatted HTML.
 
 ---
@@ -48,14 +49,24 @@ Clicking a nav button calls `activateView(navButton, section)`, which removes th
 - Dragging a file onto the zone also works.
 - On file selection, a `FormData` object is built and sent to `POST /api/upload`.
 - The paper list on the left updates in real time with the new paper title and its detected sections.
+- If the user is already on the Clustering Map tab, the map refreshes automatically after upload.
 
 #### AI Query (Synthesis tab)
 - The "Generate Insights" button sends the query text and selected mode to `POST /api/query`.
 - The response (Markdown text) is rendered into the result panel using `marked.parse()`.
 
-#### D3 Clustering
+#### Semantic Clustering Map (`ClusterMapController` class)
 - On first visit to the Clustering tab, `GET /api/clustering` is called.
-- The returned nodes and links are drawn as a draggable force-directed graph using D3.js.
+- The server returns a full payload: `points` (2-D coordinates + metadata), `clusters`, `stats`, and the `method` used (e.g. `UMAP + HDBSCAN`).
+- **Chart:** One Plotly scatter trace per cluster; outlier points use an `×` marker. Built-in toolbar provides zoom, pan, lasso select, and reset controls.
+- **Hover tooltip:** shows title, authors, year, cluster label, and similarity score.
+- **Click:** pins a detail panel in the sidebar showing full paper metadata. Clicking "Highlight cluster" fades all other clusters to 12% opacity.
+- **Filters:** dropdown by cluster, dropdown by year, debounced text search by title — all trigger `Plotly.react` (no full re-render).
+- **Toggles:** show/hide outliers, cluster centroid labels, and per-point paper labels.
+- **Stats bar:** papers · clusters · largest cluster · outliers.
+- **Method badge:** shows `UMAP + HDBSCAN`, `PCA + KMeans`, etc.
+- **Refresh button:** appears after the first successful render; forces a full re-fetch and re-render.
+- **Cache-aware:** the backend caches results by corpus fingerprint; switching away and back to the tab skips re-fetching until papers change.
 
 #### Paper Analysis
 - The paper dropdown is populated from `GET /api/papers`.
@@ -88,9 +99,9 @@ The stylesheet is organised into sections, in order:
 6. **Upload zone** — drag-and-drop area with hover state
 7. **Paper list** — uploaded papers sidebar
 8. **Query area** — form controls, textarea, select dropdowns
-9. **Buttons** — `.btn-primary` with hover/active states
+9. **Buttons** — `.btn-primary`, `.btn-secondary`, `.btn-sm` with hover/active states
 10. **Result panel** — Markdown output area, loading spinner
-11. **D3 graph** — canvas sizing, node/link colours
+11. **Semantic Clustering Map** — `.cluster-layout` two-column grid, sidebar, stats cards, filter inputs, display toggles, method badge, paper detail panel, Plotly chart wrapper, empty state, loading overlay, responsive breakpoints
 12. **Paper Analysis** — section rows, confidence bars, chart container, badges
 13. **Agent pipeline** — step dots with `pending / running / completed / failed / skipped` states, pulse animation
 14. **Agent critique panel** — confidence badge colours (`high` = green, `medium` = amber, `low` = red), weakness tags

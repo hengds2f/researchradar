@@ -2,6 +2,8 @@
 
 ResearchRadar has **96 automated tests** that verify every part of the back-end logic. They run in under 2 seconds and require no API keys or network access (all AI calls are mocked).
 
+> **Note:** `services/clustering_service.py` (added in the Semantic Clustering Map rewrite) does not yet have a dedicated test file. It is exercised indirectly through the Flask `/api/clustering` endpoint. Standalone unit tests can be added in a future `tests/test_clustering_service.py`.
+
 ---
 
 ## Running the Tests
