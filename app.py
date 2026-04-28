@@ -15,6 +15,9 @@ from huggingface_hub import InferenceClient
 # ML analysis service
 from services.paper_ml import PaperMLService
 
+# Semantic clustering
+from services.clustering_service import ClusteringService
+
 # Multi-agent orchestration
 from services.agent_orchestrator import AgentOrchestrator
 
@@ -42,6 +45,9 @@ collection = chroma_client.get_or_create_collection(name="research_papers")
 
 # Initialize ML analysis service (lazy – no local weights loaded)
 ml_service = PaperMLService(HF_TOKEN)
+
+# Initialize clustering service (stateful cache, no external deps required)
+clustering_service = ClusteringService()
 
 papers = {}
 
@@ -187,7 +193,10 @@ def upload_pdf():
                     metadatas=[{"paper_id": paper_id, "section_type": s['section_type'], "session_id": session_id}],
                     ids=[chunk_id]
                 )
-                
+
+    if uploaded_papers:
+        clustering_service.invalidate_for_papers([p['id'] for p in uploaded_papers])
+
     return jsonify({'message': 'Successfully processed', 'papers': uploaded_papers})
 
 
@@ -286,90 +295,75 @@ def query_papers():
 
 @app.route('/api/clustering', methods=['GET'])
 def clustering_data():
+    """Return a 2-D semantic map for all papers in this session.
+
+    Response schema
+    ---------------
+    {
+      "points":   [ {id, title, authors, year, x, y, cluster_id,
+                      cluster_label, is_outlier, similarity_score, color} ],
+      "clusters": [ {id, label, size, color} ],
+      "stats":    {n_papers, n_clusters, largest_cluster_size, outlier_count},
+      "method":   {reduction, clustering},
+      "cache_key": str
+    }
+
+    Returns {"points": [], "clusters": [], ...} with n_papers < 2.
+    """
     session_id, err = _session_required()
     if err:
         return err
     try:
-        # Scope to this session using the in-memory papers store (avoids
-        # unreliable ChromaDB where-filter + embeddings combination)
         session_paper_ids = [
             pid for pid, p in papers.items()
             if p.get('session_id') == session_id
         ]
 
         if len(session_paper_ids) < 2:
-            return jsonify({"nodes": [], "links": []})
+            return jsonify({
+                "points": [], "clusters": [],
+                "stats": {"n_papers": len(session_paper_ids), "n_clusters": 0,
+                          "largest_cluster_size": 0, "outlier_count": 0},
+                "method": {"reduction": "none", "clustering": "none"},
+            })
 
-        # Fetch embeddings per paper using stored chunk IDs (most reliable method)
-        all_embeddings = []
-        all_paper_ids = []
+        # --- Fetch chunk embeddings from ChromaDB, average per paper ---
+        paper_embeddings: dict[str, np.ndarray] = {}
         for pid in session_paper_ids:
             chunk_ids = papers[pid].get('chunk_ids', [])
             if not chunk_ids:
                 continue
             try:
-                result = collection.get(
-                    ids=chunk_ids,
-                    include=['embeddings'],
-                )
-                embs = result.get('embeddings')
-                if embs is not None and len(embs) > 0:
-                    for e in embs:
-                        if e is not None:
-                            all_embeddings.append(np.array(e))
-                            all_paper_ids.append(pid)
+                result = collection.get(ids=chunk_ids, include=['embeddings'])
+                embs = result.get('embeddings') or []
+                valid = [np.array(e) for e in embs if e is not None]
+                if valid:
+                    paper_embeddings[pid] = np.mean(valid, axis=0)
             except Exception as inner_exc:
-                logger.warning("Clustering: failed to fetch embeddings for paper %s: %s", pid, inner_exc)
+                logger.warning(
+                    "Clustering: failed to fetch embeddings for paper %s: %s",
+                    pid, inner_exc,
+                )
 
-        if len(set(all_paper_ids)) < 2:
-            return jsonify({"nodes": [], "links": []})
+        if len(paper_embeddings) < 2:
+            return jsonify({
+                "points": [], "clusters": [],
+                "stats": {"n_papers": len(paper_embeddings), "n_clusters": 0,
+                          "largest_cluster_size": 0, "outlier_count": 0},
+                "method": {"reduction": "none", "clustering": "none"},
+            })
 
-        embeddings = np.array(all_embeddings)
-        metadatas = [{'paper_id': pid} for pid in all_paper_ids]
+        papers_meta = [
+            {k: v for k, v in papers[pid].items() if k != 'sections'}
+            for pid in paper_embeddings
+        ]
 
-        nodes = []
-        for meta in metadatas:
-            paper_id = meta['paper_id']
-            title = papers.get(paper_id, {}).get('title', 'Unknown')
-            if not any(n['id'] == paper_id for n in nodes):
-                nodes.append({
-                    "id": paper_id,
-                    "title": title[:50] + "..." if len(title) > 50 else title,
-                    "group": 1
-                })
+        result = clustering_service.compute(papers_meta, paper_embeddings)
+        return jsonify(result)
 
-        # Aggregate chunk embeddings to paper level
-        paper_embeddings = {}
-        for emb, meta in zip(embeddings, metadatas):
-            pid = meta['paper_id']
-            if pid not in paper_embeddings:
-                paper_embeddings[pid] = []
-            paper_embeddings[pid].append(emb)
-
-        for pid in paper_embeddings:
-            paper_embeddings[pid] = np.mean(paper_embeddings[pid], axis=0)
-
-        links = []
-        p_ids = list(paper_embeddings.keys())
-        for i in range(len(p_ids)):
-            for j in range(i+1, len(p_ids)):
-                v1 = paper_embeddings[p_ids[i]]
-                v2 = paper_embeddings[p_ids[j]]
-
-                # Compute cosine similarity
-                sim = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
-
-                if sim > 0.65:  # Thematic boundary threshold
-                    links.append({
-                        "source": p_ids[i],
-                        "target": p_ids[j],
-                        "value": float(sim)
-                    })
-
-        return jsonify({"nodes": nodes, "links": links})
-    except Exception as e:
-        logger.error("Clustering matrix error: %s", e, exc_info=True)
-        return jsonify({"nodes": [], "links": []})
+    except Exception as exc:
+        logger.error("Clustering endpoint error: %s", exc, exc_info=True)
+        return jsonify({'error': str(exc)}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -406,6 +400,7 @@ def delete_paper(paper_id):
         logger.warning("ChromaDB delete failed for paper %s: %s", paper_id, exc)
 
     del papers[paper_id]
+    clustering_service.invalidate_for_papers([paper_id])
     return jsonify({'deleted': paper_id})
 
 
@@ -427,6 +422,7 @@ def clear_session():
             logger.warning("ChromaDB delete failed for paper %s: %s", pid, exc)
         del papers[pid]
 
+    clustering_service.invalidate_for_papers(session_paper_ids)
     return jsonify({'cleared': len(session_paper_ids)})
 
 

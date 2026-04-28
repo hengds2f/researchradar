@@ -99,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     navCluster.addEventListener('click', () => {
         activateView(navCluster, viewCluster);
-        renderD3Clustering();
+        clusterMap.render();
     });
 
     navAnalysis.addEventListener('click', () => {
@@ -188,7 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const count = data.papers.length;
                 uploadLog.add(`Paper${count > 1 ? 's' : ''} added successfully — ${count} paper${count > 1 ? 's' : ''} now in your knowledge base`, 'success');
                 updatePaperList(data.papers);
-                d3Rendered = false;
+                clusterMap.reset();
                 dropZone.querySelector('p').textContent = 'Drag & drop more PDFs here, or click to browse';
             }
         })
@@ -243,7 +243,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             allPapers = allPapers.filter(p => p.id !== paperId);
             renderPaperList();
-            d3Rendered = false;
+            clusterMap.reset();
             uploadLog.add('Paper removed from your knowledge base.', 'success');
         } catch (err) {
             uploadLog.add('Failed to delete paper: ' + String(err).substring(0, 100), 'error');
@@ -270,7 +270,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sessionStorage.setItem('researchSessionId', sessionId);
             allPapers = [];
             renderPaperList();
-            d3Rendered = false;
+            clusterMap.reset();
             uploadLog.add('Session cleared — all papers removed. You can now upload new papers.', 'success');
             // Reset result area
             resultContent.innerHTML = '<div class="empty-state">Query results will appear here.</div>';
@@ -348,123 +348,448 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // D3 variables
-    let d3Rendered = false;
+    // -----------------------------------------------------------------------
+    // Semantic Clustering Map — ClusterMapController
+    // -----------------------------------------------------------------------
 
-    async function renderD3Clustering() {
-        if (d3Rendered) return;
-        
-        const container = document.getElementById('d3-container');
-        container.innerHTML = '<div style="padding: 2rem; color: #94a3b8;">Loading cluster map...</div>';
+    const CLUSTER_COLORS = [
+        '#3b82f6', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b',
+        '#ef4444', '#ec4899', '#14b8a6', '#a855f7', '#f97316',
+        '#84cc16', '#0ea5e9', '#6366f1', '#22d3ee', '#fb923c',
+        '#e879f9', '#34d399', '#fbbf24', '#60a5fa', '#f43f5e',
+    ];
+    const OUTLIER_COLOR = '#475569';
 
-        const clusterLog = new ActivityLog('cluster-log');
-        const simIds = simulateProgress(clusterLog, [
-            'Loading paper embeddings from the knowledge base…',
-            'Calculating similarity scores between papers…',
-            'Grouping papers into topic clusters…',
-            'Reducing to 2D for visualisation…',
-            'Building the interactive map…',
-        ], 1100);
-        
-        try {
-            const res = await fetch('/api/clustering', { headers: sessionHeaders() });
-            const data = await res.json();
+    class ClusterMapController {
+        constructor() {
+            this._rendered = false;
+            this._data = null;
+            this._showOutliers = true;
+            this._showClusterLabels = true;
+            this._showPaperLabels = false;
+            this._filterCluster = 'all';
+            this._filterYear = 'all';
+            this._filterSearch = '';
+            this._selectedClusterId = null;
+            this._highlightActive = false;
 
-            cancelSimulation(simIds);
-            
-            if (!data.nodes || data.nodes.length === 0) {
-                clusterLog.add('Not enough papers to cluster yet — upload at least 2 papers', 'warning');
-                container.innerHTML = '<div style="padding: 2rem; color: #94a3b8;">Not enough papers uploaded to cluster yet.</div>';
-                return;
-            }
+            this._chart = document.getElementById('cluster-chart');
+            this._empty = document.getElementById('cluster-empty');
+            this._loading = document.getElementById('cluster-loading');
+            this._log = new ActivityLog('cluster-log');
+            this._statsEl = document.getElementById('cluster-stats');
+            this._filtersEl = document.getElementById('cluster-filters');
+            this._togglesEl = document.getElementById('cluster-toggles');
+            this._methodBadge = document.getElementById('cluster-method-badge');
+            this._detailPanel = document.getElementById('cluster-detail');
 
-            clusterLog.add(`Map built — ${data.nodes.length} paper${data.nodes.length > 1 ? 's' : ''} across ${new Set(data.nodes.map(n => n.group)).size} topic cluster${new Set(data.nodes.map(n => n.group)).size > 1 ? 's' : ''}`, 'success');
+            this._filterClusterEl = document.getElementById('filter-cluster');
+            this._filterYearEl = document.getElementById('filter-year');
+            this._filterSearchEl = document.getElementById('filter-search');
+            this._toggleOutliersEl = document.getElementById('toggle-outliers');
+            this._toggleClusterLabelsEl = document.getElementById('toggle-cluster-labels');
+            this._togglePaperLabelsEl = document.getElementById('toggle-paper-labels');
 
-            container.innerHTML = '';
-            
-            const width = container.clientWidth;
-            const height = container.clientHeight || 500;
-            
-            const color = d3.scaleOrdinal(d3.schemePaired);
+            this._detailTitle = document.getElementById('detail-title');
+            this._detailAuthors = document.getElementById('detail-authors');
+            this._detailYear = document.getElementById('detail-year');
+            this._detailCluster = document.getElementById('detail-cluster');
+            this._detailSimilarity = document.getElementById('detail-similarity');
+            this._detailHighlightBtn = document.getElementById('detail-highlight-cluster');
+            this._detailClearBtn = document.getElementById('detail-clear-highlight');
+            this._detailClose = document.getElementById('detail-close');
 
-            const simulation = d3.forceSimulation(data.nodes)
-                .force("link", d3.forceLink(data.links).id(d => d.id).distance(100))
-                .force("charge", d3.forceManyBody().strength(-300))
-                .force("center", d3.forceCenter(width / 2, height / 2));
+            this._setupEventListeners();
+        }
 
-            const svg = d3.select("#d3-container")
-                .append("svg")
-                .attr("width", width)
-                .attr("height", height);
+        // ── Public ───────────────────────────────────────────────────────────
 
-            const link = svg.append("g")
-                .attr("class", "links")
-                .selectAll("line")
-                .data(data.links)
-                .enter().append("line")
-                .attr("class", "link")
-                .attr("stroke-width", d => Math.sqrt(d.value) * 5);
+        reset() {
+            this._rendered = false;
+            this._data = null;
+            this._filterCluster = 'all';
+            this._filterYear = 'all';
+            this._filterSearch = '';
+            this._selectedClusterId = null;
+            this._highlightActive = false;
+            if (this._filterClusterEl) this._filterClusterEl.value = 'all';
+            if (this._filterYearEl)    this._filterYearEl.value    = 'all';
+            if (this._filterSearchEl)  this._filterSearchEl.value  = '';
+            if (this._chart && typeof Plotly !== 'undefined') Plotly.purge(this._chart);
+            this._showEmpty(true);
+            this._statsEl.classList.add('hidden');
+            this._filtersEl.classList.add('hidden');
+            this._togglesEl.classList.add('hidden');
+            this._methodBadge.classList.add('hidden');
+            this._detailPanel.classList.add('hidden');
+        }
 
-            const node = svg.append("g")
-                .attr("class", "nodes")
-                .selectAll("g")
-                .data(data.nodes)
-                .enter().append("g")
-                .call(d3.drag()
-                    .on("start", dragstarted)
-                    .on("drag", dragged)
-                    .on("end", dragended));
+        async render() {
+            if (this._rendered && this._data) return;
+            await this._fetchAndRender();
+        }
 
-            node.append("circle")
-                .attr("r", 10)
-                .attr("fill", d => color(d.group));
+        // ── Setup ────────────────────────────────────────────────────────────
 
-            node.append("text")
-                .attr("dx", 15)
-                .attr("dy", ".35em")
-                .text(d => d.title);
-
-            node.append("title")
-                .text(d => d.title);
-
-            simulation.on("tick", () => {
-                link
-                    .attr("x1", d => d.source.x)
-                    .attr("y1", d => d.source.y)
-                    .attr("x2", d => d.target.x)
-                    .attr("y2", d => d.target.y);
-
-                node
-                    .attr("transform", d => `translate(${d.x},${d.y})`);
+        _setupEventListeners() {
+            this._filterClusterEl.addEventListener('change', () => {
+                this._filterCluster = this._filterClusterEl.value;
+                this._refreshChart();
+            });
+            this._filterYearEl.addEventListener('change', () => {
+                this._filterYear = this._filterYearEl.value;
+                this._refreshChart();
             });
 
-            function dragstarted(event, d) {
-                if (!event.active) simulation.alphaTarget(0.3).restart();
-                d.fx = d.x;
-                d.fy = d.y;
+            let searchTimer;
+            this._filterSearchEl.addEventListener('input', () => {
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(() => {
+                    this._filterSearch = this._filterSearchEl.value.toLowerCase();
+                    this._refreshChart();
+                }, 200);
+            });
+
+            this._toggleOutliersEl.addEventListener('change', () => {
+                this._showOutliers = this._toggleOutliersEl.checked;
+                this._refreshChart();
+            });
+            this._toggleClusterLabelsEl.addEventListener('change', () => {
+                this._showClusterLabels = this._toggleClusterLabelsEl.checked;
+                this._refreshChart();
+            });
+            this._togglePaperLabelsEl.addEventListener('change', () => {
+                this._showPaperLabels = this._togglePaperLabelsEl.checked;
+                this._refreshChart();
+            });
+
+            this._detailClose.addEventListener('click', () => {
+                this._detailPanel.classList.add('hidden');
+                this._clearHighlight();
+            });
+            this._detailHighlightBtn.addEventListener('click', () => {
+                if (this._selectedClusterId !== null) this._applyHighlight(this._selectedClusterId);
+            });
+            this._detailClearBtn.addEventListener('click', () => this._clearHighlight());
+        }
+
+        // ── Fetch + render ────────────────────────────────────────────────────
+
+        async _fetchAndRender() {
+            this._showEmpty(false);
+            this._loading.classList.remove('hidden');
+            this._log.clear();
+
+            const simIds = simulateProgress(this._log, [
+                'Fetching paper embeddings from the knowledge base…',
+                'Normalising and projecting to 2-D (UMAP / PCA)…',
+                'Running cluster detection (HDBSCAN / KMeans)…',
+                'Building the interactive scatter map…',
+            ], 1200);
+
+            try {
+                const res = await fetch('/api/clustering', { headers: sessionHeaders() });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+
+                cancelSimulation(simIds);
+                this._loading.classList.add('hidden');
+
+                if (!data.points || data.points.length < 2) {
+                    this._log.add('Upload at least 2 papers to generate the map.', 'warning');
+                    this._showEmpty(true);
+                    return;
+                }
+
+                this._data = data;
+                this._rendered = true;
+
+                this._updateStats(data.stats);
+                this._populateClusterFilter(data.clusters);
+                this._populateYearFilter(data.points);
+                this._updateMethodBadge(data.method);
+                this._renderChart();
+
+                const { n_papers, n_clusters } = data.stats;
+                this._log.add(
+                    `Map ready — ${n_papers} paper${n_papers !== 1 ? 's' : ''}, ` +
+                    `${n_clusters} cluster${n_clusters !== 1 ? 's' : ''} ` +
+                    `(​${data.method.reduction.toUpperCase()} + ${data.method.clustering.toUpperCase()})`,
+                    'success',
+                );
+
+                this._statsEl.classList.remove('hidden');
+                this._filtersEl.classList.remove('hidden');
+                this._togglesEl.classList.remove('hidden');
+                this._methodBadge.classList.remove('hidden');
+
+            } catch (err) {
+                cancelSimulation(simIds);
+                this._loading.classList.add('hidden');
+                this._log.add('Failed to load cluster map — ' + String(err).substring(0, 100), 'error');
+                this._showEmpty(true);
+                console.error('[ClusterMap]', err);
+            }
+        }
+
+        // ── Chart ─────────────────────────────────────────────────────────────
+
+        _getFilteredPoints() {
+            if (!this._data) return [];
+            return this._data.points.filter(p => {
+                if (p.is_outlier && !this._showOutliers) return false;
+                if (this._filterCluster !== 'all' && String(p.cluster_id) !== this._filterCluster) return false;
+                if (this._filterYear !== 'all') {
+                    if (p.year == null || String(p.year) !== this._filterYear) return false;
+                }
+                if (this._filterSearch && !p.title.toLowerCase().includes(this._filterSearch)) return false;
+                return true;
+            });
+        }
+
+        _buildTraces(filteredPoints) {
+            const textMode = this._showPaperLabels ? 'markers+text' : 'markers';
+            const grouped = new Map();
+
+            for (const p of filteredPoints) {
+                const key = p.is_outlier ? '__outlier__' : String(p.cluster_id);
+                if (!grouped.has(key)) grouped.set(key, []);
+                grouped.get(key).push(p);
             }
 
-            function dragged(event, d) {
-                d.fx = event.x;
-                d.fy = event.y;
+            const traces = [];
+            for (const [key, pts] of grouped) {
+                const isOutlier = key === '__outlier__';
+                const color = isOutlier ? OUTLIER_COLOR
+                    : (pts[0].color || CLUSTER_COLORS[pts[0].cluster_id % CLUSTER_COLORS.length]);
+                const label = isOutlier ? 'Outliers' : pts[0].cluster_label;
+
+                traces.push({
+                    type: 'scatter',
+                    mode: textMode,
+                    name: label,
+                    x: pts.map(p => p.x),
+                    y: pts.map(p => p.y),
+                    text: pts.map(p => p.title.length > 28 ? p.title.slice(0, 26) + '…' : p.title),
+                    textposition: 'top center',
+                    textfont: { size: 10, color: '#cbd5e1' },
+                    customdata: pts,
+                    marker: {
+                        size: isOutlier ? 9 : 12,
+                        color,
+                        symbol: isOutlier ? 'x' : 'circle',
+                        opacity: isOutlier ? 0.55 : 0.88,
+                        line: { color: 'rgba(255,255,255,0.2)', width: 1 },
+                    },
+                    hovertemplate:
+                        '<b>%{customdata.title}</b><br>' +
+                        'Authors: %{customdata.authors}<br>' +
+                        'Year: %{customdata.year}<br>' +
+                        'Cluster: %{customdata.cluster_label}<br>' +
+                        'Similarity: %{customdata.similarity_score}' +
+                        '<extra></extra>',
+                    hoverlabel: {
+                        bgcolor: '#1e293b',
+                        bordercolor: color,
+                        font: { color: '#f8fafc', size: 13 },
+                    },
+                });
             }
 
-            function dragended(event, d) {
-                if (!event.active) simulation.alphaTarget(0);
-                d.fx = null;
-                d.fy = null;
+            const annotations = this._showClusterLabels
+                ? this._buildCentroidAnnotations(filteredPoints) : [];
+
+            return { traces, annotations };
+        }
+
+        _buildCentroidAnnotations(filteredPoints) {
+            const groups = new Map();
+            for (const p of filteredPoints) {
+                if (p.is_outlier) continue;
+                if (!groups.has(p.cluster_id))
+                    groups.set(p.cluster_id, { xs: [], ys: [], label: p.cluster_label, color: p.color });
+                const g = groups.get(p.cluster_id);
+                g.xs.push(p.x); g.ys.push(p.y);
             }
+            const annotations = [];
+            for (const [, g] of groups) {
+                const cx = g.xs.reduce((a, b) => a + b, 0) / g.xs.length;
+                const cy = g.ys.reduce((a, b) => a + b, 0) / g.ys.length;
+                annotations.push({
+                    x: cx, y: cy,
+                    text: `<b>${escapeHtml(g.label)}</b>`,
+                    showarrow: false,
+                    font: { size: 12, color: g.color || '#94a3b8' },
+                    bgcolor: 'rgba(15,23,42,0.75)',
+                    bordercolor: g.color || '#334155',
+                    borderwidth: 1,
+                    borderpad: 4,
+                });
+            }
+            return annotations;
+        }
 
-            d3Rendered = true;
+        _plotlyLayout(annotations) {
+            return {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor:  'rgba(15,23,42,0.5)',
+                font: { color: '#94a3b8', family: 'Inter, sans-serif' },
+                xaxis: {
+                    showgrid: true, gridcolor: 'rgba(255,255,255,0.05)',
+                    zeroline: false, showticklabels: false, title: '',
+                },
+                yaxis: {
+                    showgrid: true, gridcolor: 'rgba(255,255,255,0.05)',
+                    zeroline: false, showticklabels: false, title: '',
+                    scaleanchor: 'x', scaleratio: 1,
+                },
+                legend: {
+                    bgcolor: 'rgba(15,23,42,0.8)',
+                    bordercolor: 'rgba(255,255,255,0.1)',
+                    borderwidth: 1,
+                    font: { color: '#e2e8f0', size: 12 },
+                    itemsizing: 'constant',
+                },
+                margin: { l: 20, r: 20, t: 20, b: 20 },
+                hovermode: 'closest',
+                dragmode: 'pan',
+                annotations,
+                uirevision: 'cluster-map',
+            };
+        }
 
-        } catch (e) {
-            const clusterLog2 = new ActivityLog('cluster-log');
-            cancelSimulation([]);
-            clusterLog2.add('Failed to load cluster map — ' + String(e).substring(0, 80), 'error');
-            container.innerHTML = '<div style="padding: 2rem; color: #94a3b8;">Failed to load cluster map.</div>';
-            console.error(e);
+        _plotlyConfig() {
+            return {
+                responsive: true,
+                displayModeBar: true,
+                modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
+                displaylogo: false,
+                scrollZoom: true,
+            };
+        }
+
+        _renderChart() {
+            const filtered = this._getFilteredPoints();
+            if (!filtered.length) {
+                if (this._chart && typeof Plotly !== 'undefined') Plotly.purge(this._chart);
+                return;
+            }
+            const { traces, annotations } = this._buildTraces(filtered);
+            Plotly.react(this._chart, traces, this._plotlyLayout(annotations), this._plotlyConfig());
+            this._attachPlotlyEvents();
+        }
+
+        _refreshChart() {
+            if (!this._data) return;
+            this._renderChart();
+            if (this._highlightActive && this._selectedClusterId !== null)
+                this._applyHighlight(this._selectedClusterId);
+        }
+
+        // ── Plotly events ─────────────────────────────────────────────────────
+
+        _attachPlotlyEvents() {
+            if (!this._chart || !this._chart.on) return;
+            this._chart.removeAllListeners && this._chart.removeAllListeners('plotly_click');
+            this._chart.on('plotly_click', eventData => {
+                if (!eventData || !eventData.points.length) return;
+                const paper = eventData.points[0].customdata;
+                if (paper) this._showDetail(paper);
+            });
+        }
+
+        // ── Highlight ─────────────────────────────────────────────────────────
+
+        _applyHighlight(clusterId) {
+            if (!this._chart || !this._data) return;
+            this._highlightActive = true;
+            this._selectedClusterId = clusterId;
+
+            const filtered = this._getFilteredPoints();
+            const { traces, annotations } = this._buildTraces(filtered);
+            const updated = traces.map(t => {
+                const inCluster = (t.customdata || []).some(p => p && p.cluster_id === clusterId);
+                return { ...t, marker: { ...t.marker, opacity: inCluster ? 0.95 : 0.12 } };
+            });
+            Plotly.react(this._chart, updated, this._plotlyLayout(annotations), this._plotlyConfig());
+
+            this._detailHighlightBtn.classList.add('hidden');
+            this._detailClearBtn.classList.remove('hidden');
+        }
+
+        _clearHighlight() {
+            this._highlightActive = false;
+            this._detailHighlightBtn.classList.remove('hidden');
+            this._detailClearBtn.classList.add('hidden');
+            this._refreshChart();
+        }
+
+        // ── Detail panel ──────────────────────────────────────────────────────
+
+        _showDetail(paper) {
+            this._selectedClusterId = paper.cluster_id;
+            this._detailTitle.textContent     = paper.title  || '—';
+            this._detailAuthors.textContent   = paper.authors || 'Unknown';
+            this._detailYear.textContent      = paper.year != null ? paper.year : '—';
+            this._detailCluster.textContent   = paper.cluster_label || '—';
+            this._detailSimilarity.textContent =
+                paper.similarity_score != null
+                    ? `${(paper.similarity_score * 100).toFixed(1)}%` : '—';
+            this._detailPanel.classList.remove('hidden');
+            this._detailHighlightBtn.classList.remove('hidden');
+            this._detailClearBtn.classList.add('hidden');
+        }
+
+        // ── Stats / filters / badges ──────────────────────────────────────────
+
+        _updateStats(stats) {
+            document.getElementById('stat-papers').textContent   = stats.n_papers;
+            document.getElementById('stat-clusters').textContent = stats.n_clusters;
+            document.getElementById('stat-largest').textContent  = stats.largest_cluster_size;
+            document.getElementById('stat-outliers').textContent = stats.outlier_count;
+        }
+
+        _populateClusterFilter(clusters) {
+            this._filterClusterEl.innerHTML = '<option value="all">All clusters</option>';
+            clusters.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = String(c.id);
+                opt.textContent = `${c.label} (${c.size})`;
+                this._filterClusterEl.appendChild(opt);
+            });
+            if (this._data.stats.outlier_count > 0) {
+                const opt = document.createElement('option');
+                opt.value = '-1';
+                opt.textContent = `Outliers (${this._data.stats.outlier_count})`;
+                this._filterClusterEl.appendChild(opt);
+            }
+        }
+
+        _populateYearFilter(points) {
+            const years = [...new Set(points.map(p => p.year).filter(Boolean))].sort().reverse();
+            this._filterYearEl.innerHTML = '<option value="all">All years</option>';
+            years.forEach(y => {
+                const opt = document.createElement('option');
+                opt.value = String(y);
+                opt.textContent = y;
+                this._filterYearEl.appendChild(opt);
+            });
+        }
+
+        _updateMethodBadge(method) {
+            this._methodBadge.textContent =
+                `${method.reduction.toUpperCase()} + ${method.clustering.toUpperCase()}`;
+        }
+
+        _showEmpty(show) {
+            if (!this._empty) return;
+            this._empty.style.display = show ? 'flex' : 'none';
+            if (this._chart) this._chart.style.display = show ? 'none' : 'block';
         }
     }
+
+    // instantiate after DOM is ready
+    const clusterMap = new ClusterMapController();
 
     // -----------------------------------------------------------------------
     // Paper Analysis View

@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/static/styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
@@ -122,26 +123,128 @@
 
         <!-- Clustering View Section -->
         <section id="cluster-view" class="view-section hidden">
-            <div class="glass-panel full-width">
-                <h2>Semantic Clustering Map</h2>
-                <p class="subtitle">Visualizing topic groupings across the uploaded corpus based on vector embeddings.</p>
+            <div class="cluster-layout">
 
-                <details class="tool-info">
-                    <summary>How this works</summary>
-                    <div class="tool-info-body">
-                        <p>This interactive map shows how your papers relate to each other by meaning — not just keywords:</p>
-                        <ul>
-                            <li>Each dot represents one of your uploaded papers</li>
-                            <li>Papers that discuss similar topics are placed closer together</li>
-                            <li>Dots with the same colour belong to the same topic cluster</li>
-                            <li>Drag any dot to explore connections — hover to see the paper title</li>
-                            <li>Uses mathematical text embeddings (converting meaning into numbers) to measure similarity</li>
-                        </ul>
+                <!-- ── Left column: controls + legend + detail panel ─────── -->
+                <aside class="cluster-sidebar glass-panel">
+                    <h2>Clustering Map</h2>
+                    <p class="subtitle">Papers close together share semantic meaning.</p>
+
+                    <details class="tool-info">
+                        <summary>How this works</summary>
+                        <div class="tool-info-body">
+                            <p>Each dot is a paper. Proximity = semantic similarity.</p>
+                            <ul>
+                                <li>Embeddings are averaged across sections, then projected to 2-D with UMAP (or PCA as fallback)</li>
+                                <li>Clusters are found with HDBSCAN (or KMeans). True outliers appear as grey ✕ markers</li>
+                                <li>Hover a point for details; click to pin &amp; highlight the cluster</li>
+                                <li>Use the toolbar (top-right of chart) to zoom, pan, or lasso-select points</li>
+                            </ul>
+                        </div>
+                    </details>
+
+                    <!-- Stats bar -->
+                    <div id="cluster-stats" class="cluster-stats hidden">
+                        <div class="stat-card">
+                            <span class="stat-value" id="stat-papers">—</span>
+                            <span class="stat-label">Papers</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-value" id="stat-clusters">—</span>
+                            <span class="stat-label">Clusters</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-value" id="stat-largest">—</span>
+                            <span class="stat-label">Largest</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-value" id="stat-outliers">—</span>
+                            <span class="stat-label">Outliers</span>
+                        </div>
                     </div>
-                </details>
 
-                <div id="cluster-log" class="activity-log hidden"></div>
-                <div id="d3-container" class="d3-canvas"></div>
+                    <!-- Filters -->
+                    <div id="cluster-filters" class="cluster-filters hidden">
+                        <div class="form-group">
+                            <label for="filter-cluster">Cluster</label>
+                            <select id="filter-cluster" class="styled-select styled-select--sm">
+                                <option value="all">All clusters</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="filter-year">Year</label>
+                            <select id="filter-year" class="styled-select styled-select--sm">
+                                <option value="all">All years</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="filter-search">Search title</label>
+                            <input type="text" id="filter-search" class="styled-input"
+                                   placeholder="Type to filter…" autocomplete="off">
+                        </div>
+                    </div>
+
+                    <!-- Display toggles -->
+                    <div id="cluster-toggles" class="cluster-toggles hidden">
+                        <label class="toggle-row">
+                            <input type="checkbox" id="toggle-outliers" checked>
+                            <span>Show outliers</span>
+                        </label>
+                        <label class="toggle-row">
+                            <input type="checkbox" id="toggle-cluster-labels" checked>
+                            <span>Cluster labels</span>
+                        </label>
+                        <label class="toggle-row">
+                            <input type="checkbox" id="toggle-paper-labels">
+                            <span>Paper labels</span>
+                        </label>
+                    </div>
+
+                    <!-- Method badge -->
+                    <div id="cluster-method-badge" class="cluster-method-badge hidden"></div>
+
+                    <!-- Activity log -->
+                    <div id="cluster-log" class="activity-log hidden"></div>
+
+                    <!-- Selected paper detail panel -->
+                    <div id="cluster-detail" class="cluster-detail hidden">
+                        <div class="detail-header">
+                            <h3 id="detail-title">—</h3>
+                            <button id="detail-close" class="detail-close" title="Close">✕</button>
+                        </div>
+                        <dl class="detail-meta">
+                            <dt>Authors</dt><dd id="detail-authors">—</dd>
+                            <dt>Year</dt>   <dd id="detail-year">—</dd>
+                            <dt>Cluster</dt><dd id="detail-cluster">—</dd>
+                            <dt>Similarity</dt><dd id="detail-similarity">—</dd>
+                        </dl>
+                        <button id="detail-highlight-cluster" class="btn-secondary btn-sm">
+                            Highlight cluster
+                        </button>
+                        <button id="detail-clear-highlight" class="btn-secondary btn-sm hidden">
+                            Clear highlight
+                        </button>
+                    </div>
+                </aside>
+
+                <!-- ── Right column: chart canvas ────────────────────────── -->
+                <div class="cluster-chart-wrap glass-panel">
+                    <div id="cluster-chart" class="cluster-chart">
+                        <!-- Plotly renders here -->
+                    </div>
+                    <div id="cluster-empty" class="cluster-empty-state">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                        <p>Upload at least 2 papers to generate a Semantic Clustering Map.</p>
+                    </div>
+                    <div id="cluster-loading" class="cluster-loading hidden">
+                        <div class="spinner"></div>
+                        <span>Computing embeddings &amp; cluster map…</span>
+                    </div>
+                </div>
+
             </div>
         </section>
 
