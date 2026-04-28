@@ -312,11 +312,12 @@ def clustering_data():
                     ids=chunk_ids,
                     include=['embeddings'],
                 )
-                if result and result.get('embeddings'):
-                    valid = [e for e in result['embeddings'] if e is not None]
-                    if valid:
-                        all_embeddings.extend(valid)
-                        all_paper_ids.extend([pid] * len(valid))
+                embs = result.get('embeddings')
+                if embs is not None and len(embs) > 0:
+                    for e in embs:
+                        if e is not None:
+                            all_embeddings.append(np.array(e))
+                            all_paper_ids.append(pid)
             except Exception as inner_exc:
                 logger.warning("Clustering: failed to fetch embeddings for paper %s: %s", pid, inner_exc)
 
