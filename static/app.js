@@ -188,6 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const count = data.papers.length;
                 uploadLog.add(`Paper${count > 1 ? 's' : ''} added successfully — ${count} paper${count > 1 ? 's' : ''} now in your knowledge base`, 'success');
                 updatePaperList(data.papers);
+                d3Rendered = false;
                 dropZone.querySelector('p').textContent = 'Drag & drop more PDFs here, or click to browse';
             }
         })
@@ -242,6 +243,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             allPapers = allPapers.filter(p => p.id !== paperId);
             renderPaperList();
+            d3Rendered = false;
             uploadLog.add('Paper removed from your knowledge base.', 'success');
         } catch (err) {
             uploadLog.add('Failed to delete paper: ' + String(err).substring(0, 100), 'error');
@@ -268,6 +270,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sessionStorage.setItem('researchSessionId', sessionId);
             allPapers = [];
             renderPaperList();
+            d3Rendered = false;
             uploadLog.add('Session cleared — all papers removed. You can now upload new papers.', 'success');
             // Reset result area
             resultContent.innerHTML = '<div class="empty-state">Query results will appear here.</div>';

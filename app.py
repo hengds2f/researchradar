@@ -288,17 +288,39 @@ def clustering_data():
     if err:
         return err
     try:
-        all_docs = collection.get(
-            where={"session_id": {"$eq": session_id}},
-            include=['embeddings', 'metadatas'],
-        )
-        
-        if not all_docs or not all_docs.get('embeddings') or len(all_docs['embeddings']) < 2:
+        # Scope to this session using the in-memory papers store (avoids
+        # unreliable ChromaDB where-filter + embeddings combination)
+        session_paper_ids = [
+            pid for pid, p in papers.items()
+            if p.get('session_id') == session_id
+        ]
+
+        if len(session_paper_ids) < 2:
             return jsonify({"nodes": [], "links": []})
-            
-        embeddings = np.array(all_docs['embeddings'])
-        metadatas = all_docs['metadatas']
-        
+
+        # Fetch embeddings per paper using paper_id (stable, original key)
+        all_embeddings = []
+        all_metadatas = []
+        for pid in session_paper_ids:
+            try:
+                result = collection.get(
+                    where={"paper_id": {"$eq": pid}},
+                    include=['embeddings', 'metadatas'],
+                )
+                if result and result.get('embeddings'):
+                    for emb, meta in zip(result['embeddings'], result['metadatas']):
+                        if emb is not None:
+                            all_embeddings.append(emb)
+                            all_metadatas.append(meta)
+            except Exception as inner_exc:
+                logger.warning("Clustering: failed to fetch embeddings for paper %s: %s", pid, inner_exc)
+
+        if len(all_embeddings) < 2:
+            return jsonify({"nodes": [], "links": []})
+
+        embeddings = np.array(all_embeddings)
+        metadatas = all_metadatas
+
         nodes = []
         for meta in metadatas:
             paper_id = meta['paper_id']
@@ -309,7 +331,7 @@ def clustering_data():
                     "title": title[:50] + "..." if len(title) > 50 else title,
                     "group": 1
                 })
-                
+
         # Aggregate chunk embeddings to paper level
         paper_embeddings = {}
         for emb, meta in zip(embeddings, metadatas):
@@ -317,30 +339,30 @@ def clustering_data():
             if pid not in paper_embeddings:
                 paper_embeddings[pid] = []
             paper_embeddings[pid].append(emb)
-            
+
         for pid in paper_embeddings:
             paper_embeddings[pid] = np.mean(paper_embeddings[pid], axis=0)
-            
+
         links = []
         p_ids = list(paper_embeddings.keys())
         for i in range(len(p_ids)):
             for j in range(i+1, len(p_ids)):
                 v1 = paper_embeddings[p_ids[i]]
                 v2 = paper_embeddings[p_ids[j]]
-                
-                # Compute mathematical Cosine Similarity Density
+
+                # Compute cosine similarity
                 sim = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
-                
-                if sim > 0.65: # Thematic boundary threshold
+
+                if sim > 0.65:  # Thematic boundary threshold
                     links.append({
                         "source": p_ids[i],
                         "target": p_ids[j],
                         "value": float(sim)
                     })
-    
+
         return jsonify({"nodes": nodes, "links": links})
     except Exception as e:
-        print(f"Clustering matrix error: {e}")
+        logger.error("Clustering matrix error: %s", e, exc_info=True)
         return jsonify({"nodes": [], "links": []})
 
 
