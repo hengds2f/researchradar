@@ -160,6 +160,7 @@ def upload_pdf():
             chunk_types = list(set([s['section_type'] for s in sections]))
             
             paper_id = str(uuid.uuid4())
+            chunk_ids = [f"{paper_id}_chunk_{i}" for i in range(len(sections))]
             papers[paper_id] = {
                 'id': paper_id,
                 'title': filename.replace('.pdf', '').replace('.txt', ''),
@@ -167,6 +168,7 @@ def upload_pdf():
                 'chunk_types': chunk_types,
                 'sections': sections,   # stored for ML analysis
                 'session_id': session_id,
+                'chunk_ids': chunk_ids,
             }
             uploaded_papers.append(papers[paper_id])
 
@@ -298,28 +300,31 @@ def clustering_data():
         if len(session_paper_ids) < 2:
             return jsonify({"nodes": [], "links": []})
 
-        # Fetch embeddings per paper using paper_id (stable, original key)
+        # Fetch embeddings per paper using stored chunk IDs (most reliable method)
         all_embeddings = []
-        all_metadatas = []
+        all_paper_ids = []
         for pid in session_paper_ids:
+            chunk_ids = papers[pid].get('chunk_ids', [])
+            if not chunk_ids:
+                continue
             try:
                 result = collection.get(
-                    where={"paper_id": {"$eq": pid}},
-                    include=['embeddings', 'metadatas'],
+                    ids=chunk_ids,
+                    include=['embeddings'],
                 )
                 if result and result.get('embeddings'):
-                    for emb, meta in zip(result['embeddings'], result['metadatas']):
-                        if emb is not None:
-                            all_embeddings.append(emb)
-                            all_metadatas.append(meta)
+                    valid = [e for e in result['embeddings'] if e is not None]
+                    if valid:
+                        all_embeddings.extend(valid)
+                        all_paper_ids.extend([pid] * len(valid))
             except Exception as inner_exc:
                 logger.warning("Clustering: failed to fetch embeddings for paper %s: %s", pid, inner_exc)
 
-        if len(all_embeddings) < 2:
+        if len(set(all_paper_ids)) < 2:
             return jsonify({"nodes": [], "links": []})
 
         embeddings = np.array(all_embeddings)
-        metadatas = all_metadatas
+        metadatas = [{'paper_id': pid} for pid in all_paper_ids]
 
         nodes = []
         for meta in metadatas:
