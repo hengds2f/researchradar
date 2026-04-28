@@ -1,4 +1,5 @@
 import os
+import uuid
 import logging
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify, render_template, send_from_directory
@@ -55,6 +56,22 @@ provenance_service = ProvenanceService(
 # Initialize multi-agent orchestrator (passes references to shared state)
 agent_orchestrator = AgentOrchestrator(HF_TOKEN, collection, papers)
 
+def _get_session_id():
+    """Return the caller's session ID from header or query param."""
+    sid = (request.headers.get('X-Session-ID') or '').strip()
+    if not sid:
+        sid = (request.args.get('session_id') or '').strip()
+    return sid or None
+
+
+def _session_required():
+    """Return (session_id, None) or (None, error_response) if header is missing."""
+    sid = _get_session_id()
+    if not sid:
+        return None, (jsonify({'error': 'X-Session-ID header is required'}), 400)
+    return sid, None
+
+
 def extract_sections(text):
     text_clean = text.replace('\n', ' ')
     
@@ -108,6 +125,9 @@ def serve_html():
 
 @app.route('/api/upload', methods=['POST'])
 def upload_pdf():
+    session_id, err = _session_required()
+    if err:
+        return err
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
     files = request.files.getlist('file')
@@ -139,13 +159,14 @@ def upload_pdf():
             sections = extract_sections(text)
             chunk_types = list(set([s['section_type'] for s in sections]))
             
-            paper_id = str(len(papers) + 1)
+            paper_id = str(uuid.uuid4())
             papers[paper_id] = {
                 'id': paper_id,
                 'title': filename.replace('.pdf', '').replace('.txt', ''),
                 'filename': filename,
                 'chunk_types': chunk_types,
                 'sections': sections,   # stored for ML analysis
+                'session_id': session_id,
             }
             uploaded_papers.append(papers[paper_id])
 
@@ -161,7 +182,7 @@ def upload_pdf():
                 chunk_id = f"{paper_id}_chunk_{i}"
                 collection.add(
                     documents=[s['content']],
-                    metadatas=[{"paper_id": paper_id, "section_type": s['section_type']}],
+                    metadatas=[{"paper_id": paper_id, "section_type": s['section_type'], "session_id": session_id}],
                     ids=[chunk_id]
                 )
                 
@@ -212,6 +233,9 @@ def synthesize_with_llm(mode, query, retrieved_chunks):
 
 @app.route('/api/query', methods=['POST'])
 def query_papers():
+    session_id, err = _session_required()
+    if err:
+        return err
     data = request.json
     mode = data.get('mode', 'qa') 
     query_text = data.get('query', '')
@@ -227,12 +251,15 @@ def query_papers():
         
     query_target = query_text if query_text.strip() else "general academic discussion"
     
-    # Hit ChromaDB filtering native sections
+    # Hit ChromaDB filtering native sections, scoped to this session only
     try:
         results = collection.query(
             query_texts=[query_target],
             n_results=5,
-            where={"section_type": {"$in": valid_sections}}
+            where={"$and": [
+                {"section_type": {"$in": valid_sections}},
+                {"session_id": {"$eq": session_id}},
+            ]}
         )
         
         # Unpack ChromaDB generic structure
@@ -257,8 +284,14 @@ def query_papers():
 
 @app.route('/api/clustering', methods=['GET'])
 def clustering_data():
+    session_id, err = _session_required()
+    if err:
+        return err
     try:
-        all_docs = collection.get(include=['embeddings', 'metadatas'])
+        all_docs = collection.get(
+            where={"session_id": {"$eq": session_id}},
+            include=['embeddings', 'metadatas'],
+        )
         
         if not all_docs or not all_docs.get('embeddings') or len(all_docs['embeddings']) < 2:
             return jsonify({"nodes": [], "links": []})
@@ -317,10 +350,14 @@ def clustering_data():
 
 @app.route('/api/papers', methods=['GET'])
 def list_papers():
-    """Return metadata for all uploaded papers (id, title, chunk_types)."""
+    """Return metadata for papers uploaded in this session only."""
+    session_id, err = _session_required()
+    if err:
+        return err
     safe = [
-        {k: v for k, v in p.items() if k != 'sections'}
+        {k: v for k, v in p.items() if k not in ('sections', 'session_id')}
         for p in papers.values()
+        if p.get('session_id') == session_id
     ]
     return jsonify({'papers': safe})
 
@@ -331,7 +368,10 @@ def paper_ml_analysis(paper_id):
 
     Results are cached on the paper dict so repeated calls are instant.
     """
-    if paper_id not in papers:
+    session_id, err = _session_required()
+    if err:
+        return err
+    if paper_id not in papers or papers[paper_id].get('session_id') != session_id:
         return jsonify({'error': 'Paper not found'}), 404
 
     paper = papers[paper_id]
@@ -358,7 +398,10 @@ def paper_limitations(paper_id):
 
     Uses cached ML analysis when available; otherwise runs pattern detection.
     """
-    if paper_id not in papers:
+    session_id, err = _session_required()
+    if err:
+        return err
+    if paper_id not in papers or papers[paper_id].get('session_id') != session_id:
         return jsonify({'error': 'Paper not found'}), 404
 
     cached = papers[paper_id].get('ml_analysis')
@@ -376,7 +419,10 @@ def paper_limitations(paper_id):
 @app.route('/api/paper/<paper_id>/sections', methods=['GET'])
 def paper_sections(paper_id):
     """Return section chunks enriched with ML labels when analysis has run."""
-    if paper_id not in papers:
+    session_id, err = _session_required()
+    if err:
+        return err
+    if paper_id not in papers or papers[paper_id].get('session_id') != session_id:
         return jsonify({'error': 'Paper not found'}), 404
 
     paper = papers[paper_id]
@@ -422,6 +468,9 @@ def agent_run():
     if not AGENT_ENABLED:
         return jsonify({'error': 'Agent workflow is disabled (AGENT_ENABLED=false)'}), 503
 
+    session_id, err = _session_required()
+    if err:
+        return err
     data = request.get_json(silent=True) or {}
     query = (data.get('query') or '').strip()
     mode = data.get('mode', 'qa')
@@ -430,11 +479,11 @@ def agent_run():
     if not query:
         return jsonify({'error': 'query is required'}), 400
 
-    if paper_id and paper_id not in papers:
+    if paper_id and (paper_id not in papers or papers[paper_id].get('session_id') != session_id):
         return jsonify({'error': f'paper_id {paper_id!r} not found'}), 404
 
     try:
-        state = agent_orchestrator.run(query, mode, paper_id)
+        state = agent_orchestrator.run(query, mode, paper_id, session_id)
     except Exception as exc:
         logger.error("agent_run failed: %s", exc, exc_info=True)
         return jsonify({'error': f'Agent workflow error: {exc}'}), 500
@@ -470,7 +519,10 @@ def agent_run():
 @app.route('/api/research/<paper_id>/agent-state', methods=['GET'])
 def get_agent_state(paper_id):
     """Return the cached agent state for the most recent run on a paper."""
-    if paper_id not in papers:
+    session_id, err = _session_required()
+    if err:
+        return err
+    if paper_id not in papers or papers[paper_id].get('session_id') != session_id:
         return jsonify({'error': 'Paper not found'}), 404
 
     agent_state = papers[paper_id].get('latest_agent_state')
@@ -486,11 +538,13 @@ def provenance_register_upload():
     """Manually trigger provenance registration for an already-uploaded paper."""
     if not PROVENANCE_ENABLED:
         return jsonify({'error': 'Provenance is disabled (PROVENANCE_ENABLED=false)'}), 503
-
+    session_id, err = _session_required()
+    if err:
+        return err
     data = request.get_json(silent=True) or {}
     paper_id = (data.get('paper_id') or '').strip()
 
-    if not paper_id or paper_id not in papers:
+    if not paper_id or paper_id not in papers or papers[paper_id].get('session_id') != session_id:
         return jsonify({'error': 'Valid paper_id required'}), 400
 
     paper = papers[paper_id]
@@ -509,6 +563,11 @@ def provenance_register_upload():
 
 @app.route('/api/provenance/<paper_id>', methods=['GET'])
 def get_provenance(paper_id):
+    session_id, err = _session_required()
+    if err:
+        return err
+    if paper_id not in papers or papers[paper_id].get('session_id') != session_id:
+        return jsonify({'error': 'Paper not found'}), 404
     """Return the full provenance history and chain verification for a paper."""
     history = provenance_service.get_history(paper_id)
     verification = provenance_service.verify_chain(paper_id)
@@ -528,6 +587,11 @@ def get_provenance(paper_id):
 
 @app.route('/api/provenance/<paper_id>/export', methods=['GET'])
 def export_provenance(paper_id):
+    session_id, err = _session_required()
+    if err:
+        return err
+    if paper_id not in papers or papers[paper_id].get('session_id') != session_id:
+        return jsonify({'error': 'Paper not found'}), 404
     """Export the full provenance chain as a downloadable JSON file."""
     history = provenance_service.get_history(paper_id)
     verification = provenance_service.verify_chain(paper_id)
@@ -550,7 +614,10 @@ def export_provenance(paper_id):
 @app.route('/api/provenance/<paper_id>/proof', methods=['GET'])
 def download_proof(paper_id):
     """Generate a verifiable timestamped proof document for a paper."""
-    if paper_id not in papers:
+    session_id, err = _session_required()
+    if err:
+        return err
+    if paper_id not in papers or papers[paper_id].get('session_id') != session_id:
         return jsonify({'error': 'Paper not found'}), 404
 
     history = provenance_service.get_history(paper_id)

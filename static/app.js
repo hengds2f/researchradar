@@ -1,6 +1,18 @@
 document.addEventListener('DOMContentLoaded', () => {
 
     // -----------------------------------------------------------------------
+    // Session isolation — one unique ID per browser tab, never shared
+    // -----------------------------------------------------------------------
+    let sessionId = sessionStorage.getItem('researchSessionId');
+    if (!sessionId) {
+        sessionId = crypto.randomUUID();
+        sessionStorage.setItem('researchSessionId', sessionId);
+    }
+    function sessionHeaders(extra) {
+        return Object.assign({ 'X-Session-ID': sessionId }, extra);
+    }
+
+    // -----------------------------------------------------------------------
     // ActivityLog — real-time status feed for each tool
     // -----------------------------------------------------------------------
     class ActivityLog {
@@ -159,6 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         fetch('/api/upload', {
             method: 'POST',
+            headers: sessionHeaders(),
             body: formData
         })
         .then(async res => {
@@ -240,7 +253,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch('/api/query', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: sessionHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ mode, query })
             });
             
@@ -292,7 +305,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ], 1100);
         
         try {
-            const res = await fetch('/api/clustering');
+            const res = await fetch('/api/clustering', { headers: sessionHeaders() });
             const data = await res.json();
 
             cancelSimulation(simIds);
@@ -407,7 +420,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function refreshPaperSelector() {
         try {
-            const res = await fetch('/api/papers');
+            const res = await fetch('/api/papers', { headers: sessionHeaders() });
             const data = await res.json();
             const papers = data.papers || [];
 
@@ -452,7 +465,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ], 1500);
 
         try {
-            const res = await fetch(`/api/paper/${paperId}/ml-analysis`, { method: 'POST' });
+            const res = await fetch(`/api/paper/${paperId}/ml-analysis`, { method: 'POST', headers: sessionHeaders() });
             if (!res.ok) {
                 const err = await res.json();
                 throw new Error(err.error || 'ML analysis failed');
@@ -620,7 +633,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function refreshAgentPaperSelector() {
         try {
-            const res = await fetch('/api/papers');
+            const res = await fetch('/api/papers', { headers: sessionHeaders() });
             const data = await res.json();
             const papers = data.papers || [];
             agentPaperSelect.innerHTML = '<option value="">All papers (cross-paper)</option>';
@@ -717,7 +730,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch('/api/research/agent-run', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: sessionHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ query, mode, paper_id: paperId }),
             });
 
@@ -805,7 +818,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function refreshProvenancePaperSelector() {
         try {
-            const res = await fetch('/api/papers');
+            const res = await fetch('/api/papers', { headers: sessionHeaders() });
             const data = await res.json();
             const papers = data.papers || [];
             provenancePaperSelect.innerHTML = papers.length
@@ -844,7 +857,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ], 1000);
 
         try {
-            const res = await fetch(`/api/provenance/${paperId}`);
+            const res = await fetch(`/api/provenance/${paperId}`, { headers: sessionHeaders() });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
 
@@ -1009,13 +1022,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Export full chain JSON
     btnExportJson.addEventListener('click', () => {
         if (!_currentProvPaperId) return;
-        window.location.href = `/api/provenance/${encodeURIComponent(_currentProvPaperId)}/export`;
+        window.location.href = `/api/provenance/${encodeURIComponent(_currentProvPaperId)}/export?session_id=${encodeURIComponent(sessionId)}`;
     });
 
     // Download structured proof document
     btnDownloadProof.addEventListener('click', () => {
         if (!_currentProvPaperId) return;
-        window.location.href = `/api/provenance/${encodeURIComponent(_currentProvPaperId)}/proof`;
+        window.location.href = `/api/provenance/${encodeURIComponent(_currentProvPaperId)}/proof?session_id=${encodeURIComponent(sessionId)}`;
     });
 
     // Verify hash tool
@@ -1034,7 +1047,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch('/api/provenance/verify-hash', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: sessionHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ content_hash: hash }),
             });
             if (!res.ok) {

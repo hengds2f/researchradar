@@ -28,9 +28,10 @@ logger = logging.getLogger(__name__)
 # State factory
 # ---------------------------------------------------------------------------
 
-def _initial_state(query: str, mode: str, paper_id: Optional[str]) -> dict:
+def _initial_state(query: str, mode: str, paper_id: Optional[str], session_id: Optional[str] = None) -> dict:
     return {
         "session_id": str(uuid.uuid4()),
+        "caller_session_id": session_id,
         "query": query,
         "mode": mode,
         "paper_id": paper_id,
@@ -89,6 +90,7 @@ class AgentOrchestrator:
         query: str,
         mode: str,
         paper_id: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> dict:
         """
         Execute the full agent pipeline and return the final state.
@@ -100,7 +102,7 @@ class AgentOrchestrator:
         short-circuits the pipeline. Critic / writer failures are non-fatal
         and degrade gracefully (passthrough of prior stage output).
         """
-        state = _initial_state(query, mode, paper_id)
+        state = _initial_state(query, mode, paper_id, session_id)
 
         try:
             state = self.router.run(state)

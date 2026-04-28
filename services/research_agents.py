@@ -121,12 +121,28 @@ class RetrievalAgent:
             )
 
             query_target = query.strip() or "general academic discussion"
+            caller_session_id = state.get("caller_session_id")
 
-            if paper_id:
+            if paper_id and caller_session_id:
                 where_filter = {
                     "$and": [
                         {"section_type": {"$in": valid_sections}},
                         {"paper_id": {"$eq": paper_id}},
+                        {"session_id": {"$eq": caller_session_id}},
+                    ]
+                }
+            elif paper_id:
+                where_filter = {
+                    "$and": [
+                        {"section_type": {"$in": valid_sections}},
+                        {"paper_id": {"$eq": paper_id}},
+                    ]
+                }
+            elif caller_session_id:
+                where_filter = {
+                    "$and": [
+                        {"section_type": {"$in": valid_sections}},
+                        {"session_id": {"$eq": caller_session_id}},
                     ]
                 }
             else:
